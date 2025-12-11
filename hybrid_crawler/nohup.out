@@ -1,21 +1,21 @@
-2025-12-11 09:18:09 [scrapy.utils.log] INFO: Scrapy 2.11.1 started (bot: hybrid_crawler)
-2025-12-11 09:18:09 [scrapy.utils.log] INFO: Versions: lxml 5.2.1.0, libxml2 2.13.1, cssselect 1.2.0, parsel 1.8.1, w3lib 2.1.2, Twisted 23.10.0, Python 3.12.7 | packaged by Anaconda, Inc. | (main, Oct  4 2024, 08:22:19) [Clang 14.0.6 ], pyOpenSSL 25.1.0 (OpenSSL 3.0.16 11 Feb 2025), cryptography 43.0.0, Platform macOS-15.5-arm64-arm-64bit
-2025-12-11 09:18:09 [scrapy.addons] INFO: Enabled addons:
+2025-12-11 09:46:30 [scrapy.utils.log] INFO: Scrapy 2.11.1 started (bot: hybrid_crawler)
+2025-12-11 09:46:30 [scrapy.utils.log] INFO: Versions: lxml 5.2.1.0, libxml2 2.13.1, cssselect 1.2.0, parsel 1.8.1, w3lib 2.1.2, Twisted 23.10.0, Python 3.12.7 | packaged by Anaconda, Inc. | (main, Oct  4 2024, 08:22:19) [Clang 14.0.6 ], pyOpenSSL 25.1.0 (OpenSSL 3.0.16 11 Feb 2025), cryptography 43.0.0, Platform macOS-15.5-arm64-arm-64bit
+2025-12-11 09:46:30 [scrapy.addons] INFO: Enabled addons:
 []
-2025-12-11 09:18:09 [py.warnings] WARNING: /opt/anaconda3/lib/python3.12/site-packages/scrapy/utils/request.py:254: ScrapyDeprecationWarning: '2.6' is a deprecated value for the 'REQUEST_FINGERPRINTER_IMPLEMENTATION' setting.
+2025-12-11 09:46:30 [py.warnings] WARNING: /opt/anaconda3/lib/python3.12/site-packages/scrapy/utils/request.py:254: ScrapyDeprecationWarning: '2.6' is a deprecated value for the 'REQUEST_FINGERPRINTER_IMPLEMENTATION' setting.
 
 It is also the default value. In other words, it is normal to get this warning if you have not defined a value for the 'REQUEST_FINGERPRINTER_IMPLEMENTATION' setting. This is so for backward compatibility reasons, but it will change in a future version of Scrapy.
 
 See the documentation of the 'REQUEST_FINGERPRINTER_IMPLEMENTATION' setting for information on how to handle this deprecation.
   return cls(crawler)
 
-2025-12-11 09:18:09 [scrapy.extensions.telnet] INFO: Telnet Password: f038f296b9347b85
-2025-12-11 09:18:09 [scrapy.middleware] INFO: Enabled extensions:
+2025-12-11 09:46:30 [scrapy.extensions.telnet] INFO: Telnet Password: 1836e14c12924df0
+2025-12-11 09:46:30 [scrapy.middleware] INFO: Enabled extensions:
 ['scrapy.extensions.corestats.CoreStats',
  'scrapy.extensions.telnet.TelnetConsole',
  'scrapy.extensions.memusage.MemoryUsage',
  'scrapy.extensions.logstats.LogStats']
-2025-12-11 09:18:09 [scrapy.crawler] INFO: Overridden settings:
+2025-12-11 09:46:30 [scrapy.crawler] INFO: Overridden settings:
 {'BOT_NAME': 'hybrid_crawler',
  'CONCURRENT_REQUESTS': 1,
  'DOWNLOAD_DELAY': 15,
@@ -23,7 +23,7 @@ See the documentation of the 'REQUEST_FINGERPRINTER_IMPLEMENTATION' setting for 
  'NEWSPIDER_MODULE': 'hybrid_crawler.spiders',
  'SPIDER_MODULES': ['hybrid_crawler.spiders'],
  'TWISTED_REACTOR': 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'}
-2025-12-11 09:18:09 [scrapy.middleware] INFO: Enabled downloader middlewares:
+2025-12-11 09:46:30 [scrapy.middleware] INFO: Enabled downloader middlewares:
 ['hybrid_crawler.middlewares.StrategyRoutingMiddleware',
  'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware',
  'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware',
@@ -36,33 +36,95 @@ See the documentation of the 'REQUEST_FINGERPRINTER_IMPLEMENTATION' setting for 
  'scrapy.downloadermiddlewares.cookies.CookiesMiddleware',
  'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware',
  'scrapy.downloadermiddlewares.stats.DownloaderStats']
-2025-12-11 09:18:09 [scrapy.middleware] INFO: Enabled spider middlewares:
+2025-12-11 09:46:30 [scrapy.middleware] INFO: Enabled spider middlewares:
 ['scrapy.spidermiddlewares.httperror.HttpErrorMiddleware',
  'scrapy.spidermiddlewares.offsite.OffsiteMiddleware',
  'scrapy.spidermiddlewares.referer.RefererMiddleware',
  'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware',
  'scrapy.spidermiddlewares.depth.DepthMiddleware']
-2025-12-11 09:18:09 [scrapy.middleware] INFO: Enabled item pipelines:
+2025-12-11 09:46:30 [scrapy.middleware] INFO: Enabled item pipelines:
 ['hybrid_crawler.pipelines.DataCleaningPipeline',
  'hybrid_crawler.pipelines.NhsaDrugPipeline']
-2025-12-11 09:18:09 [scrapy.core.engine] INFO: Spider opened
-2025-12-11 09:18:09 [scrapy.extensions.logstats] INFO: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
-2025-12-11 09:18:09 [scrapy.extensions.telnet] INFO: Telnet console listening on 127.0.0.1:6023
-2025-12-11 09:18:09 [scrapy-playwright] INFO: Starting download handler
-2025-12-11 09:18:09 [scrapy-playwright] INFO: Starting download handler
-2025-12-11 09:18:15 [nhsa_drug_spider] INFO: 当前页: 1, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
-2025-12-11 09:18:15 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 1 条数据
-2025-12-11 09:18:17 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:18:27 [nhsa_drug_spider] INFO: 当前页: 266, 每页记录数: 685, 总记录数: 265685, 总页数: 266
-2025-12-11 09:18:30 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:18:30 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:18:48 [nhsa_drug_spider] INFO: 当前页: 265, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
-2025-12-11 09:18:49 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 185 条数据
-2025-12-11 09:18:51 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:19:08 [nhsa_drug_spider] INFO: 当前页: 264, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
-2025-12-11 09:19:09 [scrapy.extensions.logstats] INFO: Crawled 4 pages (at 4 pages/min), scraped 3685 items (at 3685 items/min)
-2025-12-11 09:19:11 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:19:11 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:19:23 [nhsa_drug_spider] INFO: 当前页: 263, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
-2025-12-11 09:19:25 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
-2025-12-11 09:19:25 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:46:30 [scrapy.core.engine] INFO: Spider opened
+2025-12-11 09:46:30 [scrapy.extensions.logstats] INFO: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
+2025-12-11 09:46:30 [scrapy.extensions.telnet] INFO: Telnet console listening on 127.0.0.1:6023
+2025-12-11 09:46:30 [scrapy-playwright] INFO: Starting download handler
+2025-12-11 09:46:30 [scrapy-playwright] INFO: Starting download handler
+2025-12-11 09:46:41 [nhsa_drug_spider] INFO: 当前页: 1, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:46:41 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 1 条数据
+2025-12-11 09:46:44 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:46:53 [nhsa_drug_spider] INFO: 当前页: 266, 每页记录数: 685, 总记录数: 265685, 总页数: 266
+2025-12-11 09:46:55 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:46:55 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:06 [nhsa_drug_spider] INFO: 当前页: 265, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:47:07 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 185 条数据
+2025-12-11 09:47:09 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:25 [nhsa_drug_spider] INFO: 当前页: 264, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:47:28 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:28 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:30 [scrapy.extensions.logstats] INFO: Crawled 4 pages (at 4 pages/min), scraped 3685 items (at 3685 items/min)
+2025-12-11 09:47:37 [nhsa_drug_spider] INFO: 当前页: 263, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:47:40 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:40 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:55 [nhsa_drug_spider] INFO: 当前页: 262, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:47:58 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:47:58 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:10 [nhsa_drug_spider] INFO: 当前页: 261, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:48:13 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:13 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:25 [nhsa_drug_spider] INFO: 当前页: 260, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:48:28 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:28 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:30 [scrapy.extensions.logstats] INFO: Crawled 8 pages (at 4 pages/min), scraped 7685 items (at 4000 items/min)
+2025-12-11 09:48:39 [nhsa_drug_spider] INFO: 当前页: 259, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:48:41 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:41 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:55 [nhsa_drug_spider] INFO: 当前页: 258, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:48:58 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:48:58 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:49:15 [nhsa_drug_spider] INFO: 当前页: 257, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:49:18 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:49:18 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:49:30 [nhsa_drug_spider] INFO: 当前页: 256, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:49:30 [scrapy.extensions.logstats] INFO: Crawled 12 pages (at 4 pages/min), scraped 11685 items (at 4000 items/min)
+2025-12-11 09:49:32 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:49:32 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:49:47 [nhsa_drug_spider] INFO: 当前页: 255, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:49:50 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:49:50 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:03 [nhsa_drug_spider] INFO: 当前页: 254, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:50:06 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:06 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:22 [nhsa_drug_spider] INFO: 当前页: 253, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:50:25 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:25 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:30 [scrapy.extensions.logstats] INFO: Crawled 15 pages (at 3 pages/min), scraped 14685 items (at 3000 items/min)
+2025-12-11 09:50:38 [nhsa_drug_spider] INFO: 当前页: 252, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:50:41 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:41 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:56 [nhsa_drug_spider] INFO: 当前页: 251, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:50:58 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:50:58 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:51:12 [nhsa_drug_spider] INFO: 当前页: 250, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:51:15 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:51:15 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:51:30 [scrapy.extensions.logstats] INFO: Crawled 18 pages (at 3 pages/min), scraped 17685 items (at 3000 items/min)
+2025-12-11 09:51:31 [nhsa_drug_spider] INFO: 当前页: 249, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:51:33 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:51:33 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:51:53 [nhsa_drug_spider] INFO: 当前页: 248, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:51:56 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:51:56 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:52:06 [nhsa_drug_spider] INFO: 当前页: 247, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:52:09 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:52:09 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:52:22 [nhsa_drug_spider] INFO: 当前页: 246, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:52:24 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:52:24 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:52:30 [scrapy.extensions.logstats] INFO: Crawled 22 pages (at 4 pages/min), scraped 21685 items (at 4000 items/min)
+2025-12-11 09:52:44 [nhsa_drug_spider] INFO: 当前页: 245, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:52:47 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:52:47 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:53:09 [nhsa_drug_spider] INFO: 当前页: 244, 每页记录数: 1000, 总记录数: 265685, 总页数: 266
+2025-12-11 09:53:12 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
+2025-12-11 09:53:12 [hybrid_crawler.pipelines] INFO: ✅ 成功批量写入 500 条数据
