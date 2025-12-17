@@ -1,6 +1,5 @@
 import os
 import sys
-import threading
 
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
@@ -25,15 +24,16 @@ SPIDER_MAP = {
     # 'hn_simple': HackerNewsSpider,
     # 'quotes_dynamic': DynamicQuotesSpider,
 
-    'fujian_drug_store': FujianDrugSpider,
+    # 'fujian_drug_store': FujianDrugSpider,
     'hainan_drug_store': HainanDrugSpider,
-    'hebei_drug_store': HebeiDrugSpider,
-    'liaoning_drug_store': LiaoningDrugSpider,
-    'ningxia_drug_store': NingxiaDrugSpider,
-    # 'shandong_drug_store': ShandongDrugSpider,
-    'guangdong_drug_spider': GuangdongDrugSpider,
-    'tianjin_drug_spider': TianjinDrugSpider,
+    # 'hebei_drug_store': HebeiDrugSpider,
+    # 'liaoning_drug_store': LiaoningDrugSpider,
+    # 'ningxia_drug_store': NingxiaDrugSpider,
+    # 'guangdong_drug_spider': GuangdongDrugSpider,
+    # 'tianjin_drug_spider': TianjinDrugSpider,
     # 'nhsa_drug_spider': NhsaDrugSpider,
+
+    # 'shandong_drug_store': ShandongDrugSpider,    
 }
 
 def run_spider(spider_cls, spider_name, is_debug):
@@ -43,8 +43,17 @@ def run_spider(spider_cls, spider_name, is_debug):
     if is_debug:
         settings.set('LOG_LEVEL', 'DEBUG')
     
-    # 为每个爬虫设置单独的日志文件
-    settings.set('LOG_FILE', os.path.join(os.getcwd(), 'log', f'{spider_name}.log'))
+    # 获取脚本所在目录的绝对路径
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 为每个爬虫设置单独的日志文件路径
+    log_dir = os.path.join(script_dir, 'log')
+    log_file = os.path.join(log_dir, f'{spider_name}.log')
+    
+    # 确保日志目录存在
+    os.makedirs(log_dir, exist_ok=True)
+    
+    settings.set('LOG_FILE', log_file)
     
     process = CrawlerProcess(settings)
     process.crawl(spider_cls)
@@ -72,19 +81,12 @@ def run():
         print(f">>> 正在运行爬虫: {spider_name}")
         run_spider(SPIDER_MAP[spider_name], spider_name, is_debug)
     else:
-        # 并行运行所有爬虫
-        print(">>> 正在并行运行所有爬虫")
-        threads = []
+        # 逐个运行所有爬虫
+        print(">>> 正在逐个运行所有爬虫")
         
         for name, spider_cls in SPIDER_MAP.items():
-            print(f">>> 启动爬虫线程: {name}")
-            thread = threading.Thread(target=run_spider, args=(spider_cls, name, is_debug))
-            threads.append(thread)
-            thread.start()
-        
-        # 等待所有线程完成
-        for thread in threads:
-            thread.join()
+            print(f">>> 正在运行爬虫: {name}")
+            run_spider(spider_cls, name, is_debug)
     
     print(">>> 所有爬虫运行完成")
 

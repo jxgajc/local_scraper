@@ -54,5 +54,8 @@ LOG_ENCODING = 'utf-8'
 LOG_FORMAT = '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
 LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
 # 日志保存路径
-LOG_FILE = os.path.join(os.getcwd(), 'log', 'scrapy.log')
+script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+log_dir = os.path.join(script_dir, 'log')
+os.makedirs(log_dir, exist_ok=True)
+LOG_FILE = os.path.join(log_dir, 'scrapy.log')
 
