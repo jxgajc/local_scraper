@@ -9,15 +9,32 @@ os.environ['SCRAPY_SETTINGS_MODULE'] = 'hybrid_crawler.settings'
 
 # 导入爬虫 (需确保已安装 Twisted Asyncio Reactor)
 from hybrid_crawler.spiders.example import HackerNewsSpider, DynamicQuotesSpider
-from hybrid_crawler.spiders.hainan_drug_store import HainanDrugStoreSpider
+
+from hybrid_crawler.spiders.fujian_drug_store import FujianDrugSpider
+from hybrid_crawler.spiders.hainan_drug_store import HainanDrugSpider
+from hybrid_crawler.spiders.hebei_drug_store import HebeiDrugSpider
+from hybrid_crawler.spiders.liaoning_drug_store import LiaoningDrugSpider
+from hybrid_crawler.spiders.ningxia_drug_store import NingxiaDrugSpider
 from hybrid_crawler.spiders.nhsa_drug_spider import NhsaDrugSpider
+from hybrid_crawler.spiders.shandong_drug_store import ShandongDrugSpider
+from hybrid_crawler.spiders.guangdong_drug_store import GuangdongDrugSpider
+from hybrid_crawler.spiders.tianjin_drug_store import TianjinDrugSpider
 # 爬虫映射表
 SPIDER_MAP = {
     # 'hn_simple': HackerNewsSpider,
     # 'quotes_dynamic': DynamicQuotesSpider,
-    # 'hainan_drug_store': HainanDrugStoreSpider,
-    # 'hainan_drug_store': HainanDrugStoreSpider,
-    'nhsa_drug_spider': NhsaDrugSpider,
+
+    # 'fujian_drug_store': FujianDrugSpider,
+    # 'hainan_drug_store': HainanDrugSpider,
+    # 'hebei_drug_store': HebeiDrugSpider,
+    # 'liaoning_drug_store': LiaoningDrugSpider,
+    # 'ningxia_drug_store': NingxiaDrugSpider,
+    'shandong_drug_store': ShandongDrugSpider,
+    # 'guangdong_drug_spider': GuangdongDrugSpider,
+    # 'tianjin_drug_spider': TianjinDrugSpider,
+
+
+    # 'nhsa_drug_spider': NhsaDrugSpider,
 }
 
 def run():
