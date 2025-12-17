@@ -57,7 +57,7 @@ class LiaoningDrugItem(scrapy.Item):
 
 
 class LiaoningDrug(BaseModel):
-    __tablename__ = 'liaoning_drug'
+    __tablename__ = 'drug_hospital_liaoning'
     
     # 自增主键
     id = Column(Integer, primary_key=True, autoincrement=True, comment="自增主键")

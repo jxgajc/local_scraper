@@ -67,7 +67,7 @@ class NingxiaDrug(BaseModel):
     """
     SQLAlchemy 模型定义
     """
-    __tablename__ = 'ningxia_drug'
+    __tablename__ = 'drug_hospital_ningxia'
     
     # 自增主键
     id = Column(Integer, primary_key=True, autoincrement=True, comment="自增主键")

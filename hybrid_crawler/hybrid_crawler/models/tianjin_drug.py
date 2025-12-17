@@ -52,7 +52,7 @@ class TianjinDrug(BaseModel):
     """
     天津市药品挂网及采购数据表
     """
-    __tablename__ = 'tianjin_drug'
+    __tablename__ = 'drug_hospital_tianjin'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     md5_id = Column(String(32), index=True)
