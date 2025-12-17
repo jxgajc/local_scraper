@@ -87,30 +87,17 @@ def run():
     log_dir = os.path.join(script_dir, 'log')
     os.makedirs(log_dir, exist_ok=True)
     
-    # 创建单个 CrawlerProcess 实例
-    process = CrawlerProcess(settings)
-    
     if spider_name:
         # 运行指定的爬虫
         print(f">>> 正在运行爬虫: {spider_name}")
-        spider_cls = SPIDER_MAP[spider_name]
-        # 为单个爬虫设置日志文件
-        settings.set('LOG_FILE', os.path.join(log_dir, f'{spider_name}.log'))
-        process.crawl(spider_cls)
+        run_spider(SPIDER_MAP[spider_name], spider_name, is_debug)
     else:
-        # 添加所有爬虫到同一个进程
-        print(">>> 正在添加所有爬虫到运行队列")
+        # 为每个爬虫创建独立的进程和日志文件
+        print(">>> 正在启动所有爬虫（每个爬虫独立进程）")
         
         for name, spider_cls in SPIDER_MAP.items():
-            print(f">>> 添加爬虫: {name}")
-            # 为每个爬虫设置独立的日志文件
-            # 注意: 当运行多个爬虫时，日志会合并到一个文件
-            # 如果需要分离日志，需要更复杂的配置
-            process.crawl(spider_cls)
-    
-    # 启动进程，所有爬虫将同时运行
-    print(">>> 正在启动所有爬虫...")
-    process.start(stop_after_crawl=True)
+            print(f">>> 正在运行爬虫: {name}")
+            run_spider(spider_cls, name, is_debug)
     
     print(">>> 所有爬虫运行完成")
 
