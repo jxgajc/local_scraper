@@ -7,8 +7,14 @@ import pandas as pd
 from scrapy.http import JsonRequest, FormRequest  # 记得导入这个
 # 跑一天
 # http://ggzy.ln.gov.cn/yphc/gzcx/
-df_name = pd.read_excel(r"/Users/jcagito/Desktop/未命名文件夹/gen_spider/脚本文件夹/关键字采集(2).xlsx")
-product_list =df_name.loc[:,"采集关键字"].to_list()
+import os
+# 获取脚本所在目录的绝对路径
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# 构建Excel文件的绝对路径
+excel_path = os.path.join(script_dir, "../../关键字采集(2).xlsx")
+# 读取Excel文件
+df_name = pd.read_excel(excel_path)
+product_list = df_name.loc[:, "采集关键字"].to_list()
 
 class LiaoningDrugSpider(BaseRequestSpider):
     """
