@@ -1,3 +1,5 @@
+import os
+
 BOT_NAME = 'hybrid_crawler'
 SPIDER_MODULES = ['hybrid_crawler.spiders']
 NEWSPIDER_MODULE = 'hybrid_crawler.spiders'
@@ -46,3 +48,11 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
 }
 
 LOG_LEVEL = 'INFO'
+# 日志配置
+LOG_ENABLED = True
+LOG_ENCODING = 'utf-8'
+LOG_FORMAT = '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
+LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
+# 日志保存路径
+LOG_FILE = os.path.join(os.getcwd(), 'log', 'scrapy.log')
+

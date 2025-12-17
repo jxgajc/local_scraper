@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
@@ -24,18 +25,31 @@ SPIDER_MAP = {
     # 'hn_simple': HackerNewsSpider,
     # 'quotes_dynamic': DynamicQuotesSpider,
 
-    # 'fujian_drug_store': FujianDrugSpider,
-    # 'hainan_drug_store': HainanDrugSpider,
-    # 'hebei_drug_store': HebeiDrugSpider,
-    # 'liaoning_drug_store': LiaoningDrugSpider,
-    # 'ningxia_drug_store': NingxiaDrugSpider,
-    'shandong_drug_store': ShandongDrugSpider,
-    # 'guangdong_drug_spider': GuangdongDrugSpider,
-    # 'tianjin_drug_spider': TianjinDrugSpider,
-
-
+    'fujian_drug_store': FujianDrugSpider,
+    'hainan_drug_store': HainanDrugSpider,
+    'hebei_drug_store': HebeiDrugSpider,
+    'liaoning_drug_store': LiaoningDrugSpider,
+    'ningxia_drug_store': NingxiaDrugSpider,
+    # 'shandong_drug_store': ShandongDrugSpider,
+    'guangdong_drug_spider': GuangdongDrugSpider,
+    'tianjin_drug_spider': TianjinDrugSpider,
     # 'nhsa_drug_spider': NhsaDrugSpider,
 }
+
+def run_spider(spider_cls, spider_name, is_debug):
+    """在单个线程中运行指定的爬虫"""
+    settings = get_project_settings()
+    
+    if is_debug:
+        settings.set('LOG_LEVEL', 'DEBUG')
+    
+    # 为每个爬虫设置单独的日志文件
+    settings.set('LOG_FILE', os.path.join(os.getcwd(), 'log', f'{spider_name}.log'))
+    
+    process = CrawlerProcess(settings)
+    process.crawl(spider_cls)
+    process.start(stop_after_crawl=True)
+
 
 def run():
     print(">>> 正在启动混合爬虫系统...")
@@ -50,25 +64,29 @@ def run():
             spider_name = arg
             break
     
-    settings = get_project_settings()
-    
     if is_debug:
         print(">>> 🐞 Debug 模式已开启: 日志级别 DEBUG")
-        settings.set('LOG_LEVEL', 'DEBUG')
-    
-    process = CrawlerProcess(settings)
     
     if spider_name:
         # 运行指定的爬虫
         print(f">>> 正在运行爬虫: {spider_name}")
-        process.crawl(SPIDER_MAP[spider_name])
+        run_spider(SPIDER_MAP[spider_name], spider_name, is_debug)
     else:
-        # 默认运行所有爬虫
-        print(">>> 正在运行所有爬虫")
-        for spider in SPIDER_MAP.values():
-            process.crawl(spider)
+        # 并行运行所有爬虫
+        print(">>> 正在并行运行所有爬虫")
+        threads = []
+        
+        for name, spider_cls in SPIDER_MAP.items():
+            print(f">>> 启动爬虫线程: {name}")
+            thread = threading.Thread(target=run_spider, args=(spider_cls, name, is_debug))
+            threads.append(thread)
+            thread.start()
+        
+        # 等待所有线程完成
+        for thread in threads:
+            thread.join()
     
-    process.start()
+    print(">>> 所有爬虫运行完成")
 
 if __name__ == '__main__':
     run()
