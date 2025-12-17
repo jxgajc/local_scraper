@@ -33,25 +33,25 @@ BUFFER_TIMEOUT_SEC = 1.5 # 或最长等待 1.5 秒写入一次
 # =============================================================================
 # Playwright 专用配置
 # =============================================================================
-try:
-    from scrapy_playwright.handler import ScrapyPlaywrightDownloadHandler
-    DOWNLOAD_HANDLERS = {
-        "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-        "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    }
-    # 必须使用 Asyncio 反应堆
-    TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
-    # 💡 Debug: 将 headless 改为 False 可看到浏览器
-    PLAYWRIGHT_LAUNCH_OPTIONS = {
-        'headless': True,
-        'args': ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-        'timeout': 30000, # 启动超时时间
-    }
-except ImportError:
-    # 如果无法导入 scrapy_playwright，使用默认的下载处理器
-    DOWNLOAD_HANDLERS = {}
-    # 不需要设置 Asyncio 反应堆
-    pass
+# try:
+#     from scrapy_playwright.handler import ScrapyPlaywrightDownloadHandler
+#     DOWNLOAD_HANDLERS = {
+#         "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+#         "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+#     }
+#     # 必须使用 Asyncio 反应堆
+#     TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+#     # 💡 Debug: 将 headless 改为 False 可看到浏览器
+#     PLAYWRIGHT_LAUNCH_OPTIONS = {
+#         'headless': True,
+#         'args': ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+#         'timeout': 30000, # 启动超时时间
+#     }
+# except ImportError:
+#     # 如果无法导入 scrapy_playwright，使用默认的下载处理器
+#     DOWNLOAD_HANDLERS = {}
+#     # 不需要设置 Asyncio 反应堆
+#     pass
 
 LOG_LEVEL = 'INFO'
 # 日志配置
