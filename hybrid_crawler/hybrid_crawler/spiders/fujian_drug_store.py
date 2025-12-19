@@ -6,7 +6,7 @@ from scrapy.http import JsonRequest
 class FujianDrugSpider(scrapy.Spider):
     """
     福建省医疗保障局 - 药品挂网及采购医院查询
-    Target: https://open.ybj.fujian.gov.cn:10013
+    Target: https://open.ybj.fujian.gov.cn:10013/tps-local/#/external/product-publicity
     """
     name = "fujian_drug_spider"
     

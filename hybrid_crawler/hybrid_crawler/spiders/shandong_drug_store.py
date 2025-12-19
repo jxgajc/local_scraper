@@ -17,7 +17,7 @@ df_name = pd.read_excel(excel_path)
 product_list = df_name.loc[:, "采集关键字"].to_list()
 
 class ShandongDrugSpider(scrapy.Spider):
-    name = "shandong_drug_spider"
+    name = "drug_hosipital_shandong"
     
     # 接口 URL
     index_url = "https://ypjc.ybj.shandong.gov.cn/trade/drug/query-of-hanging-directory/index"
@@ -28,7 +28,7 @@ class ShandongDrugSpider(scrapy.Spider):
     product_names = product_list
 
     custom_settings = {
-        'CONCURRENT_REQUESTS': 3, # 稍微降低并发，避免验证码接口请求过快被封
+        'CONCURRENT_REQUESTS': 1, # 稍微降低并发，避免验证码接口请求过快被封
         'DOWNLOAD_DELAY': 2,
         'DEFAULT_REQUEST_HEADERS': {
             'Accept': 'application/json, text/plain, */*',
@@ -80,6 +80,9 @@ class ShandongDrugSpider(scrapy.Spider):
         current_keyword = response.meta.get('keyword')
         retry_payload = response.meta.get('retry_payload') # 如果是重试，会有这个值
         
+        # 生成当前时间戳用于文件名
+        timestamp = int(time.time() * 1000)
+        
         try:
             res_json = json.loads(response.text)
             if not res_json.get("success"):
@@ -98,6 +101,19 @@ class ShandongDrugSpider(scrapy.Spider):
             # ddddocr 识别
             ocr = ddddocr.DdddOcr(show_ad=False)
             img_bytes = base64.b64decode(base64_str.split(',')[-1])
+            
+            # 保存验证码图片为jpg
+            captcha_dir = os.path.join(script_dir, "captcha_images")
+            if not os.path.exists(captcha_dir):
+                os.makedirs(captcha_dir)
+            
+            # 生成唯一的文件名
+            filename = f"captcha_{current_keyword}_{timestamp}_{random_str}.jpg"
+            file_path = os.path.join(captcha_dir, filename)
+            with open(file_path, "wb") as f:
+                f.write(img_bytes)
+            self.logger.info(f"[{current_keyword}] 验证码图片已保存至: {file_path}")
+            
             code_result = ocr.classification(img_bytes)
             
             self.logger.info(f"[{current_keyword}] 验证码识别: {code_result}")
