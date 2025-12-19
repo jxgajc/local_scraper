@@ -73,7 +73,7 @@ class NingxiaDrug(BaseModel):
     id = Column(Integer, primary_key=True, autoincrement=True, comment="自增主键")
     
     # 业务唯一ID
-    md5_id = Column(String(32), unique=True, index=True, comment="MD5唯一标识")
+    md5_id = Column(String(32), index=True, comment="MD5唯一标识")# , unique=True
     
     # --- 药品订单信息列 ---
     orderDetailId = Column(String(64), comment="订单明细ID")

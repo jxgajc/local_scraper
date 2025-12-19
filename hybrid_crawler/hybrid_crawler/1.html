@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>医院药品在销采集汇报</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* 1. GLOBAL RESET & BASE STYLES */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            background-color: #f1f5f9;
+            display: grid;
+            place-items: center;
+            min-height: 100vh;
+            font-family: 'Roboto', 'Noto Sans SC', sans-serif;
+            color: #334155;
+            padding: 20px 0;
+        }
+
+        /* 2. SLIDE CONTAINER */
+        .slide-container {
+            width: 1280px;
+            height: 720px;
+            background-color: #ffffff;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 3. COMMON TYPOGRAPHY */
+        h2.slide-title {
+            font-size: 48px;
+            color: #0f172a;
+            font-weight: 700;
+            margin-bottom: 30px;
+            position: relative;
+            z-index: 10;
+        }
+        
+        p, li, td, th {
+            font-size: 20px;
+            line-height: 1.5;
+            color: #475569;
+        }
+
+        /* 4. LAYOUT 1: IMAGE RIGHT TEXT LEFT */
+        .layout-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 60px;
+            padding: 60px 80px;
+            height: 100%;
+            align-items: center;
+        }
+
+        .text-side {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .highlight-box {
+            background: #f8fafc;
+            border-left: 6px solid #3b82f6;
+            padding: 25px;
+            margin-top: 20px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .highlight-box code {
+            background: #e2e8f0;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #0f172a;
+            font-weight: bold;
+        }
+
+        .repo-link {
+            font-size: 16px;
+            color: #64748b;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #f1f5f9;
+            padding: 8px 12px;
+            border-radius: 6px;
+            width: fit-content;
+        }
+
+        .image-wrapper-std {
+            width: 100%;
+            height: 500px;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        .image-wrapper-std img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* 5. LAYOUT 2: BLEED IMAGE RIGHT WITH TABLE */
+        .layout-bleed {
+            display: grid;
+            grid-template-columns: 1.3fr 0.7fr; /* More space for table */
+            height: 100%;
+            width: 100%;
+        }
+
+        .bleed-content {
+            padding: 60px 50px 60px 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background: #fff;
+        }
+
+        .bleed-image {
+            height: 100%;
+            width: 100%;
+            position: relative;
+        }
+
+        .bleed-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+        }
+
+        .bleed-image::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to right, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 20%);
+        }
+
+        /* TABLE STYLES */
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .custom-table th {
+            background-color: #f1f5f9;
+            color: #334155;
+            font-weight: 700;
+            text-align: left;
+            padding: 16px;
+            border-bottom: 2px solid #cbd5e0;
+            font-size: 18px;
+        }
+
+        .custom-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: middle;
+            font-size: 18px;
+        }
+
+        /* TAGS */
+        .status-tag {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 700;
+            display: inline-block;
+            white-space: nowrap;
+        }
+
+        .tag-green { background-color: #dcfce7; color: #166534; } /* Solvable */
+        .tag-red { background-color: #fee2e2; color: #991b1b; }   /* Technical Barrier */
+        .tag-gray { background-color: #f3f4f6; color: #4b5563; }  /* Data Missing */
+
+        /* ASSISTANCE BOX */
+        .action-box {
+            background: linear-gradient(135deg, #eff6ff 0%, #e0f2fe 100%);
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 25px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .action-icon {
+            font-size: 32px;
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Slide 1: Progress & Storage -->
+    <div class="slide-container" id="slide1">
+        <div class="layout-split">
+            <div class="text-side">
+                <h2 class="slide-title">医院药品在销采集进度</h2>
+                
+                <div style="margin-bottom: 30px;">
+                    <h3 style="color:#334155; font-size: 26px; margin-bottom: 15px;">
+                        <i class="fa-solid fa-bars-progress" style="color:#f59e0b; margin-right:10px;"></i>
+                        脚本测试通过，全量采集中
+                    </h3>
+                    <p>目前 <strong>7个省份</strong> 的采集脚本已完成开发并测试通过，正在进行全量数据抓取。</p>
+                    <p style="font-size: 18px; color:#64748b; margin-top:10px; margin-bottom: 15px;">(河北、辽宁、宁夏、广东、天津、海南、福建)</p>
+                    
+                    <div class="repo-link">
+                        <i class="fa-brands fa-github"></i>
+                        <span>脚本仓库：github.com/jxgajc/local_scraper</span>
+                    </div>
+                </div>
+
+                <div class="highlight-box">
+                    <h3 style="color:#0f172a; font-size: 22px; margin-bottom: 10px;"><i class="fa-solid fa-database" style="color:#3b82f6; margin-right:10px;"></i>数据存储规范</h3>
+                    <p style="margin-bottom: 8px;">数据库：<code>spiderweb</code></p>
+                    <p>表结构：<code>drug_hosipitall_{省份}</code></p>
+                </div>
+            </div>
+            <div class="image-wrapper-std">
+                <img src="http://googleusercontent.com/image_collection/image_retrieval/16842942637518239451" alt="Data Center Visualization">
+            </div>
+        </div>
+    </div>
+
+    <!-- Slide 2: Analysis & Assistance -->
+    <div class="slide-container" id="slide2">
+        <div class="layout-bleed">
+            <div class="bleed-content">
+                <h2 class="slide-title">采集阻碍分类与协助诉求</h2>
+                
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th width="20%">分类</th>
+                            <th width="25%">涉及省份</th>
+                            <th width="55%">情况说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="status-tag tag-green">可解决</span></td>
+                            <td><strong>山东</strong></td>
+                            <td>接口权限报错，预计通过技术调试修复。</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-tag tag-red">技术壁垒</span></td>
+                            <td><strong>上海、江苏<br>江西</strong></td>
+                            <td>涉及APP逆向、手机验证码阻断。<strong>技术层面极难突破。</strong></td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-tag tag-gray">数据缺失</span></td>
+                            <td><strong>浙江</strong></td>
+                            <td>只有医保目录和医院信息，无在销数据。</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="action-box">
+                    <div class="action-icon"><i class="fa-solid fa-hand-holding-hand"></i></div>
+                    <div>
+                        <h3 style="color:#1e40af; font-size: 22px; margin-bottom: 5px;">核心协助诉求</h3>
+                        <p style="color:#1e3a8a; font-weight: 500;">鉴于移动端和验证码的技术限制，建议跳过技术攻坚，<strong>全力拓展新的业务数据源</strong>以覆盖缺失省份。</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bleed-image">
+                <img src="http://googleusercontent.com/image_collection/image_retrieval/4072507688120108351" alt="Business Strategy Meeting">
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+```
