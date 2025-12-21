@@ -71,7 +71,7 @@ class LiaoningDrug(BaseModel):
     ProductName = Column(String(255), nullable=True, comment="药品名称")
     MedicineModelName = Column(String(128), nullable=True, comment="药品剂型名称")
     POS = Column(Integer, nullable=True, comment="POS")
-    Outlookc = Column(String(128), nullable=True, comment="规格")
+    Outlookc = Column(String(512), nullable=True, comment="规格")
     HospitalName = Column(String(512), nullable=True, comment="医院名称")
     Pack = Column(String(512), nullable=True, comment="包装规格")
     GoodsName = Column(String(255), nullable=True, comment="商品名称")
