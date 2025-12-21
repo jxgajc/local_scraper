@@ -37,34 +37,6 @@ SPIDER_MAP = {
     # 'shandong_drug_store': ShandongDrugSpider,    
 }
 
-def run_spider(spider_cls, spider_name, is_debug):
-    """在单个线程中运行指定的爬虫"""
-    settings = get_project_settings()
-    
-    if is_debug:
-        settings.set('LOG_LEVEL', 'DEBUG')
-    
-    # 获取脚本所在目录的绝对路径
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 为每个爬虫设置单独的日志文件路径
-    log_dir = os.path.join(script_dir, 'log')
-    log_file = os.path.join(log_dir, f'{spider_name}.log')
-    
-    # 确保日志目录存在
-    os.makedirs(log_dir, exist_ok=True)
-    
-    settings.set('LOG_FILE', log_file)
-    
-    process = CrawlerProcess(settings)
-    crawler = process.create_crawler(spider_cls)
-    process.crawl(crawler)
-    process.start(stop_after_crawl=True)
-    
-    # 返回爬虫统计信息
-    return crawler.stats.get_stats()
-
-
 def generate_summary_report(spider_stats):
     """生成采集总结报告"""
     summary = """\n========================================
@@ -159,22 +131,37 @@ def run():
     log_dir = os.path.join(script_dir, 'log')
     os.makedirs(log_dir, exist_ok=True)
     
-    # 收集爬虫统计信息
-    spider_stats = {}
+    # 创建一个CrawlerProcess来运行所有爬虫
+    process = CrawlerProcess(settings)
+    
+    # 收集爬虫实例和名称映射
+    crawlers = []
     
     if spider_name:
         # 运行指定的爬虫
-        print(f">>> 正在运行爬虫: {spider_name}")
-        stats = run_spider(SPIDER_MAP[spider_name], spider_name, is_debug)
-        spider_stats[spider_name] = stats
+        print(f">>> 正在添加爬虫: {spider_name}")
+        crawler_cls = SPIDER_MAP[spider_name]
+        crawler = process.create_crawler(crawler_cls)
+        process.crawl(crawler)
+        crawlers.append((spider_name, crawler))
     else:
         # 为每个爬虫创建独立的进程和日志文件
-        print(">>> 正在启动所有爬虫（每个爬虫独立进程）")
+        print(">>> 正在添加所有爬虫")
         
         for name, spider_cls in SPIDER_MAP.items():
-            print(f">>> 正在运行爬虫: {name}")
-            stats = run_spider(spider_cls, name, is_debug)
-            spider_stats[name] = stats
+            print(f">>> 正在添加爬虫: {name}")
+            crawler = process.create_crawler(spider_cls)
+            process.crawl(crawler)
+            crawlers.append((name, crawler))
+    
+    # 启动爬虫，设置stop_after_crawl=True，让爬虫完成后自动停止
+    process.start(stop_after_crawl=True)
+    
+    # 收集爬虫统计信息
+    spider_stats = {}
+    for name, crawler in crawlers:
+        stats = crawler.stats.get_stats()
+        spider_stats[name] = stats
     
     # 生成并打印总结报告
     summary_report = generate_summary_report(spider_stats)
