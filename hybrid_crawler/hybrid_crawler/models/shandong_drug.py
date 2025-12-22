@@ -59,7 +59,7 @@ class ShandongDrug(BaseModel):
     山东省药品挂网及医院采购数据模型
     对应 ShandongDrugItem 的扁平化结构
     """
-    __tablename__ = 'drug_hospital_shandong'
+    __tablename__ = 'drug_hospital_shandong_test'
 
     # --- 基础主键 ---
     id = Column(Integer, primary_key=True, autoincrement=True, comment="自增主键")

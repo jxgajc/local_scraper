@@ -73,7 +73,7 @@ class NhsaDrugItem(scrapy.Item):
 
 
 class NhsaDrug(BaseModel):
-    __tablename__ = 'nhsa_drug'
+    __tablename__ = 'nhsa_drug_test'
     
     # 自增主键
     id = Column(Integer, primary_key=True, autoincrement=True, comment="自增主键")

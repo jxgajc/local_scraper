@@ -101,7 +101,7 @@ class GuangdongDrug(BaseModel):
     """
     广东省药品挂网数据表
     """
-    __tablename__ = 'drug_hospital_guangdong'
+    __tablename__ = 'drug_hospital_guangdong_test'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     md5_id = Column(String(32), index=True)#, unique=True

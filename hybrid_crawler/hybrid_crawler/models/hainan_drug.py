@@ -57,7 +57,7 @@ class HainanDrug(BaseModel):
     """
     海南省药品库存查询表
     """
-    __tablename__ = 'drug_shop_hainan'
+    __tablename__ = 'drug_shop_hainan_test'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     md5_id = Column(String(32), index=True)

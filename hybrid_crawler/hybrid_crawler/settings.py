@@ -21,6 +21,7 @@ DOWNLOADER_MIDDLEWARES = {
 
 ITEM_PIPELINES = {
     'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
+    'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 采集状态记录
     'hybrid_crawler.pipelines.AsyncBatchWritePipeline': 400,     # 入库
 }
 
@@ -57,11 +58,24 @@ LOG_LEVEL = 'INFO'
 # 日志配置
 LOG_ENABLED = True
 LOG_ENCODING = 'utf-8'
-LOG_FORMAT = '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
 LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
+
 # 日志保存路径
 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 log_dir = os.path.join(script_dir, 'log')
 os.makedirs(log_dir, exist_ok=True)
-LOG_FILE = os.path.join(log_dir, 'scrapy.log')
+
+# 禁用 Scrapy 默认的文件日志，使用我们的自定义日志管理器
+LOG_FILE = None
+
+# 日志处理器配置
+LOG_STDOUT = True
+
+# 为不同模块设置日志级别
+LOG_LEVELS = {
+    'scrapy': 'WARNING',
+    'twisted': 'WARNING',
+    'hybrid_crawler': 'INFO',
+}
 

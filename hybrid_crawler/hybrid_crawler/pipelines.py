@@ -5,6 +5,7 @@ from twisted.internet import threads
 from itemadapter import ItemAdapter
 from .models import SessionLocal, init_db
 from .models.crawl_data import CrawlData
+from .models.crawl_status import CrawlStatus
 from .models.fujian_drug import FujianDrug
 from .models.hainan_drug import HainanDrug
 from .models.hebei_drug import HebeiDrug
@@ -248,3 +249,54 @@ class ShandongDrugPipeline(AsyncBatchWritePipeline):
         return ShandongDrug
     # 字段映射已经在爬虫的_create_item方法中完成，这里可以使用默认的映射
     # 如果需要额外的字段转换，可以重写 _create_orm_object 方法
+
+
+class CrawlStatusPipeline:
+    """
+    爬虫状态记录管道
+    用于记录每个爬虫的采集过程和参数，用于数据完整性验证
+    接收特殊的状态item，格式为 {'_status_': True, ...}
+    """
+    def __init__(self):
+        self.session = SessionLocal()
+    
+    @classmethod
+    def from_crawler(cls, crawler):
+        init_db()
+        return cls()
+    
+    def process_item(self, item, spider):
+        # 检查是否为状态记录item
+        if isinstance(item, dict) and item.get('_status_'):
+            self._save_status(item, spider)
+            return item
+        return item
+    
+    def _save_status(self, status_item, spider):
+        """保存采集状态"""
+        try:
+            status = CrawlStatus(
+                spider_name=status_item.get('spider_name', spider.name),
+                crawl_id=status_item.get('crawl_id'),
+                stage=status_item.get('stage'),
+                page_no=status_item.get('page_no', 1),
+                total_pages=status_item.get('total_pages', 0),
+                page_size=status_item.get('page_size', 0),
+                items_found=status_item.get('items_found', 0),
+                items_stored=status_item.get('items_stored', 0),
+                params=status_item.get('params'),
+                api_url=status_item.get('api_url'),
+                success=status_item.get('success', True),
+                error_message=status_item.get('error_message'),
+                parent_crawl_id=status_item.get('parent_crawl_id'),
+                reference_id=status_item.get('reference_id')
+            )
+            self.session.add(status)
+            self.session.commit()
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"❌ 保存采集状态失败: {e}")
+    
+    def close_spider(self, spider):
+        """关闭数据库会话"""
+        self.session.close()

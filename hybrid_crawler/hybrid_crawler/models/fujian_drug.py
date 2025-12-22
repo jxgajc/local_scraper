@@ -52,7 +52,7 @@ class FujianDrug(BaseModel):
     """
     福建省药品挂网及采购数据表
     """
-    __tablename__ = 'drug_hospital_fujian'
+    __tablename__ = 'drug_hospital_fujian_test'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     md5_id = Column(String(32), index=True)#, unique=True

@@ -1,7 +1,9 @@
 import scrapy
 import json
+import uuid
 from ..models.guangdong_drug import GuangdongDrugItem
 from scrapy.http import JsonRequest
+from ..utils.logger_utils import get_spider_logger
 
 class GuangdongDrugSpider(scrapy.Spider):
     """
@@ -9,10 +11,16 @@ class GuangdongDrugSpider(scrapy.Spider):
     Target: https://igi.hsa.gd.gov.cn
     """
     name = "guangdong_drug_spider"
-
+    
     # API Endpoints
     list_api_url = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/queryPubonlnPage"
     hospital_api_url = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/getPurcHospitalInfoListNew"
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.spider_log = get_spider_logger(self.name)
+        self.crawl_id = str(uuid.uuid4())
+        self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}")
 
     custom_settings = {
         'CONCURRENT_REQUESTS': 5,
@@ -25,14 +33,15 @@ class GuangdongDrugSpider(scrapy.Spider):
             'Origin': 'https://igi.hsa.gd.gov.cn',
             'Referer': 'https://igi.hsa.gd.gov.cn/tps/tps_public/publicity/listPubonlnPublicityD',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-            'Authorization': 'null', # Explicitly set as per curl
+            'Authorization': 'null',
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
         },
         'ITEM_PIPELINES': {
             'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.GuangdongDrugPipeline': 400,           # 入库
+            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
+            'hybrid_crawler.pipelines.GuangdongDrugPipeline': 400,       # 入库
         }
     }
 
@@ -43,30 +52,80 @@ class GuangdongDrugSpider(scrapy.Spider):
             "size": 500,
             "searchCount": True
         }
+        
+        self.spider_log.info(f"📋 开始采集药品列表，初始payload: {json.dumps(payload)}")
+        
+        # 上报开始采集状态
+        # yield {
+        #     '_status_': True,
+        #     'crawl_id': self.crawl_id,
+        #     'stage': 'start_requests',
+        #     'page_no': 1,
+        #     'params': payload,
+        #     'api_url': self.list_api_url,
+        #     'success': True
+        # }
+        
         yield JsonRequest(
             url=self.list_api_url,
             method='POST',
             data=payload,
             callback=self.parse_list,
-            meta={'payload': payload},
+            meta={'payload': payload, 'crawl_id': self.crawl_id},
             dont_filter=True
         )
 
     def parse_list(self, response):
         """Parse drug list and trigger hospital queries"""
+        page_crawl_id = str(uuid.uuid4())
+        current_payload = response.meta['payload']
+        parent_crawl_id = response.meta['crawl_id']
+        
         try:
             res_json = json.loads(response.text)
             if not res_json.get("success"):
-                self.logger.error(f"List API Error: {response.text[:100]}")
+                error_msg = res_json.get('message', 'Unknown Error')
+                self.spider_log.error(f"❌ 药品列表API错误 (Page {current_payload['current']}): {error_msg}")
+                
+                # 上报失败状态
+                yield {
+                    '_status_': True,
+                    'crawl_id': page_crawl_id,
+                    'stage': 'list_page',
+                    'page_no': current_payload['current'],
+                    'total_pages': 0,
+                    'params': current_payload,
+                    'api_url': self.list_api_url,
+                    'success': False,
+                    'error_message': error_msg,
+                    'parent_crawl_id': parent_crawl_id
+                }
                 return
 
             data_block = res_json.get("data", {})
             records = data_block.get("records", [])
             current_page = data_block.get("current", 1)
             total_pages = data_block.get("pages", 0)
+            page_size = data_block.get("size", 500)
 
-            self.logger.info(f"[Page {current_page}/{total_pages}] Fetched {len(records)} drug records")
+            self.spider_log.info(f"📄 药品列表页面 [{current_page}/{total_pages}] - 发现 {len(records)} 条药品记录")
+            
+            # 上报页面采集状态
+            yield {
+                '_status_': True,
+                'crawl_id': page_crawl_id,
+                'stage': 'list_page',
+                'page_no': current_page,
+                'total_pages': total_pages,
+                'page_size': page_size,
+                'items_found': len(records),
+                'params': current_payload,
+                'api_url': self.list_api_url,
+                'success': True,
+                'parent_crawl_id': parent_crawl_id
+            }
 
+            item_count = 0
             for record in records:
                 # 1. Map drug info to Item (Lossless mapping)
                 base_info = {
@@ -122,9 +181,13 @@ class GuangdongDrugSpider(scrapy.Spider):
                         meta={
                             'base_info': base_info, 
                             'payload': hospital_payload,
+                            'parent_crawl_id': page_crawl_id,
+                            'drug_name': base_info.get('gen_name')
                         },
                         dont_filter=True
                     )
+                    # Note: item_count increment happens in parse_hospital or via stored items later
+                    item_count += 1 
                 else:
                     # No drugCode, cannot query hospitals, save basic info
                     item = GuangdongDrugItem()
@@ -132,11 +195,28 @@ class GuangdongDrugSpider(scrapy.Spider):
                     item['has_hospital_record'] = False
                     item.generate_md5_id()
                     yield item
+                    item_count += 1
+
+            # 更新页面采集状态
+            yield {
+                '_status_': True,
+                'crawl_id': page_crawl_id,
+                'stage': 'list_page',
+                'page_no': current_page,
+                'total_pages': total_pages,
+                'items_found': len(records),
+                'items_stored': item_count, # 初步计数，包含触发了子请求的数量
+                'params': current_payload,
+                'api_url': self.list_api_url,
+                'success': True,
+                'parent_crawl_id': parent_crawl_id
+            }
 
             # Pagination for Drug List
             if current_page < total_pages:
+                self.spider_log.info(f"🔄 准备采集下一页药品列表 [{current_page + 1}/{total_pages}]")
                 next_page = current_page + 1
-                new_payload = response.meta['payload'].copy()
+                new_payload = current_payload.copy()
                 new_payload['current'] = next_page
                 
                 yield JsonRequest(
@@ -144,35 +224,83 @@ class GuangdongDrugSpider(scrapy.Spider):
                     method='POST',
                     data=new_payload,
                     callback=self.parse_list,
-                    meta={'payload': new_payload},
+                    meta={'payload': new_payload, 'crawl_id': self.crawl_id},
                     dont_filter=True
                 )
+            else:
+                self.spider_log.info(f"✅ 药品列表采集完成，共 {total_pages} 页")
 
         except Exception as e:
-            self.logger.error(f"Parse List Error: {e}", exc_info=True)
+            self.spider_log.error(f"❌ 解析药品列表失败 (Page {current_payload.get('current')}): {e}", exc_info=True)
+            
+            yield {
+                '_status_': True,
+                'crawl_id': page_crawl_id,
+                'stage': 'list_page',
+                'page_no': current_payload.get('current'),
+                'params': current_payload,
+                'api_url': self.list_api_url,
+                'success': False,
+                'error_message': str(e),
+                'parent_crawl_id': parent_crawl_id
+            }
 
     def parse_hospital(self, response):
         """Parse hospital list and yield items"""
         base_info = response.meta['base_info']
         current_payload = response.meta['payload']
+        parent_crawl_id = response.meta['parent_crawl_id']
+        drug_name = response.meta.get('drug_name', 'Unknown')
+        hospital_crawl_id = str(uuid.uuid4())
 
         try:
             res_json = json.loads(response.text)
             
             if not res_json.get("success"):
-                self.logger.warning(f"Hospital API Fail for {base_info['drug_code']}: {response.text[:100]}")
-                # Yield basic info even if hospital query fails? 
-                # Better to log and maybe retry, or yield basic info. Here we strictly yield only valid data.
+                error_msg = res_json.get('message', 'Unknown Error')
+                self.spider_log.warning(f"⚠️ 药品 [{drug_name}] 医院API错误: {error_msg}")
+                
+                # 上报错误但记录基础信息
+                yield {
+                    '_status_': True,
+                    'crawl_id': hospital_crawl_id,
+                    'stage': 'detail_page',
+                    'page_no': current_payload['current'],
+                    'params': current_payload,
+                    'api_url': self.hospital_api_url,
+                    'success': False,
+                    'error_message': error_msg,
+                    'parent_crawl_id': parent_crawl_id,
+                    'reference_id': base_info['drug_code']
+                }
                 return
 
             data = res_json.get("data", {})
             records = data.get("records", [])
             current_page = data.get("current", 1)
             total_pages = data.get("pages", 0)
+            page_size = data.get("size", 50)
             
+            self.spider_log.info(f"🏥 药品 [{drug_name}] 医院列表 [{current_page}/{total_pages}] - 发现 {len(records)} 条医院记录")
+            
+            # 上报医院查询状态
+            yield {
+                '_status_': True,
+                'crawl_id': hospital_crawl_id,
+                'stage': 'detail_page',
+                'page_no': current_page,
+                'total_pages': total_pages,
+                'page_size': page_size,
+                'items_found': len(records),
+                'params': current_payload,
+                'api_url': self.hospital_api_url,
+                'success': True,
+                'parent_crawl_id': parent_crawl_id,
+                'reference_id': base_info['drug_code']
+            }
+
+            item_count = 0
             if records:
-                self.logger.info(f"[{base_info['gen_name']}] Found {len(records)} hospital records (Page {current_page}/{total_pages})")
-                
                 for hosp in records:
                     item = GuangdongDrugItem()
                     item.update(base_info)
@@ -186,7 +314,6 @@ class GuangdongDrugSpider(scrapy.Spider):
                     item['url'] = "https://igi.hsa.gd.gov.cn/tps/tps_public/publicity/listPubonlnPublicityD"
                     
                     # Parse Administration Division
-                    # Format: "广东省＞广州市＞增城分中心"
                     admdvs_full = hosp.get('admdvsName', '')
                     item['admdvs_name'] = admdvs_full
                     
@@ -199,33 +326,68 @@ class GuangdongDrugSpider(scrapy.Spider):
                     
                     item.generate_md5_id()
                     yield item
+                    item_count += 1
+                
+                # Pagination for Hospital List
+                if current_page < total_pages:
+                    self.spider_log.info(f"🔄 准备采集药品 [{drug_name}] 下一页医院列表 [{current_page + 1}/{total_pages}]")
+                    next_page = current_page + 1
+                    new_payload = current_payload.copy()
+                    new_payload['current'] = next_page
+                    
+                    yield JsonRequest(
+                        url=self.hospital_api_url,
+                        method='POST',
+                        data=new_payload,
+                        callback=self.parse_hospital,
+                        meta={
+                            'base_info': base_info,
+                            'payload': new_payload,
+                            'parent_crawl_id': parent_crawl_id,
+                            'drug_name': drug_name
+                        },
+                        dont_filter=True
+                    )
             else:
                 # No hospital records found
-                # self.logger.debug(f"[{base_info['gen_name']}] No hospital records.")
-                item = GuangdongDrugItem()
-                item.update(base_info)
-                item['has_hospital_record'] = False
-                item['url'] = "https://igi.hsa.gd.gov.cn/tps/tps_public/publicity/listPubonlnPublicityD"
-                item.generate_md5_id()
-                yield item
-
-            # Pagination for Hospital List
-            if current_page < total_pages:
-                next_page = current_page + 1
-                new_payload = current_payload.copy()
-                new_payload['current'] = next_page
-                
-                yield JsonRequest(
-                    url=self.hospital_api_url,
-                    method='POST',
-                    data=new_payload,
-                    callback=self.parse_hospital,
-                    meta={
-                        'base_info': base_info,
-                        'payload': new_payload
-                    },
-                    dont_filter=True
-                )
+                if current_page == 1:
+                    self.spider_log.info(f"📋 药品 [{drug_name}] 没有医院采购记录")
+                    item = GuangdongDrugItem()
+                    item.update(base_info)
+                    item['has_hospital_record'] = False
+                    item['url'] = "https://igi.hsa.gd.gov.cn/tps/tps_public/publicity/listPubonlnPublicityD"
+                    item.generate_md5_id()
+                    yield item
+                    item_count += 1
+            
+            # 更新状态，记录实际存储条数
+            yield {
+                '_status_': True,
+                'crawl_id': hospital_crawl_id,
+                'stage': 'detail_page',
+                'page_no': current_page,
+                'total_pages': total_pages,
+                'items_found': len(records),
+                'items_stored': item_count,
+                'params': current_payload,
+                'api_url': self.hospital_api_url,
+                'success': True,
+                'parent_crawl_id': parent_crawl_id,
+                'reference_id': base_info['drug_code']
+            }
 
         except Exception as e:
-            self.logger.error(f"Parse Hospital Error: {e}", exc_info=True)
+            self.spider_log.error(f"❌ 药品 [{drug_name}] 医院查询失败: {e}", exc_info=True)
+            
+            yield {
+                '_status_': True,
+                'crawl_id': hospital_crawl_id,
+                'stage': 'detail_page',
+                'page_no': current_payload.get('current'),
+                'params': current_payload,
+                'api_url': self.hospital_api_url,
+                'success': False,
+                'error_message': str(e),
+                'parent_crawl_id': parent_crawl_id,
+                'reference_id': base_info.get('drug_code')
+            }
