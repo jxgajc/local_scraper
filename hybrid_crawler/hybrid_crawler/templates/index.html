@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS | CRAWLER COMMAND</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: { black: '#050508', panel: '#13131f', neon: '#00f3ff', purple: '#bc13fe', green: '#0aff60', red: '#ff0a48' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .glass-panel { background: rgba(19, 19, 31, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
+        .terminal-log { font-family: 'Consolas', monospace; white-space: pre-wrap; word-break: break-all; }
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0a0a0f; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00f3ff; }
+        
+        .log-info { color: #a0aec0; }
+        .log-warn { color: #ecc94b; }
+        .log-error { color: #f56565; font-weight: bold; }
+        .log-success { color: #48bb78; }
+        .log-highlight { color: #00f3ff; }
+    </style>
+</head>
+<body class="bg-cyber-black text-gray-200 h-screen overflow-hidden font-sans selection:bg-cyber-neon selection:text-black">
+
+    <div id="app" class="h-full flex flex-col relative">
+        
+        <!-- Header -->
+        <header class="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-cyber-panel z-10">
+            <div class="flex items-center gap-3">
+                <i class="fa-solid fa-spider text-cyber-neon text-xl animate-pulse"></i>
+                <h1 class="text-xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyber-neon to-cyber-purple italic">
+                    NEXUS <span class="text-xs text-gray-500 not-italic">COMMAND CENTER</span>
+                </h1>
+            </div>
+            <div class="font-mono text-xs text-cyber-neon/60 flex gap-4">
+                <span>SYSTEM: ONLINE</span>
+                <span v-text="currentTime"></span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex overflow-hidden p-4 gap-4">
+            
+            <!-- Left: Control & List -->
+            <div class="w-1/3 flex flex-col gap-4">
+                <!-- Controls -->
+                <div class="glass-panel p-4 rounded-xl flex flex-col gap-3">
+                    <div class="flex gap-2">
+                        <button @click="startSelected" :disabled="!hasSelection" class="flex-1 bg-cyber-neon/10 text-cyber-neon border border-cyber-neon/50 py-2 rounded hover:bg-cyber-neon hover:text-black transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-sm uppercase">
+                            <i class="fa-solid fa-play mr-2"></i> Start
+                        </button>
+                        <button @click="stopSelected" :disabled="!hasSelection" class="flex-1 bg-cyber-red/10 text-cyber-red border border-cyber-red/50 py-2 rounded hover:bg-cyber-red hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-sm uppercase">
+                            <i class="fa-solid fa-stop mr-2"></i> Stop
+                        </button>
+                    </div>
+                    <button @click="resetDatabase" class="text-xs text-gray-600 hover:text-cyber-red underline text-center">Reset Database (Dev Only)</button>
+                </div>
+
+                <!-- Spider List -->
+                <div class="glass-panel flex-1 rounded-xl flex flex-col overflow-hidden">
+                    <div class="p-3 border-b border-white/10 flex justify-between items-center bg-black/20">
+                        <span class="text-xs font-bold text-gray-400">AVAILABLE SPIDERS</span>
+                        <button @click="selectAll" class="text-[10px] text-cyber-neon hover:underline">Select All</button>
+                    </div>
+                    <div class="overflow-y-auto flex-1 p-2 space-y-2">
+                        <div v-for="spider in spiders" :key="spider.name" 
+                             class="group p-3 rounded-lg border border-transparent hover:border-cyber-neon/30 bg-white/5 cursor-pointer relative transition-all"
+                             :class="{'ring-1 ring-cyber-neon bg-cyber-neon/5': selected.includes(spider.name)}"
+                             @click="toggleSelect(spider.name)">
+                            
+                            <!-- Running Status Dot -->
+                            <div class="absolute right-3 top-3 flex items-center gap-2">
+                                <button @click.stop="openMonitor(spider.name)" class="text-xs bg-gray-700 hover:bg-cyber-neon hover:text-black text-gray-300 px-2 py-1 rounded transition-colors opacity-0 group-hover:opacity-100">
+                                    <i class="fa-solid fa-desktop"></i> Monitor
+                                </button>
+                                <span v-if="spider.status === 'running'" class="w-2 h-2 rounded-full bg-cyber-green shadow-[0_0_8px_#0aff60] animate-pulse"></span>
+                                <span v-else class="w-2 h-2 rounded-full bg-gray-600"></span>
+                            </div>
+
+                            <div class="font-mono text-sm font-bold text-gray-200 mb-1" v-text="spider.name"></div>
+                            <div class="flex gap-4 text-[10px] text-gray-500 font-mono">
+                                <span><i class="fa-solid fa-database"></i> <span v-text="spider.stats.items || 0"></span></span>
+                                <span><i class="fa-solid fa-clock"></i> <span v-text="spider.stats.last_run || '-'"></span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Dashboard Stats -->
+            <div class="w-2/3 flex flex-col gap-4">
+                <div class="grid grid-cols-2 gap-4 h-32">
+                    <div class="glass-panel rounded-xl p-5 flex flex-col justify-center relative overflow-hidden">
+                        <div class="absolute right-0 top-0 w-32 h-32 bg-cyber-neon/5 rounded-full blur-3xl"></div>
+                        <div class="text-gray-400 text-xs font-mono uppercase tracking-wider">Total Items</div>
+                        <div class="text-4xl font-black text-white font-mono mt-1" v-text="stats.total_items.toLocaleString()"></div>
+                    </div>
+                    <div class="glass-panel rounded-xl p-5 flex flex-col justify-center relative overflow-hidden">
+                        <div class="absolute right-0 top-0 w-32 h-32 bg-cyber-purple/5 rounded-full blur-3xl"></div>
+                        <div class="text-gray-400 text-xs font-mono uppercase tracking-wider">Total Runs</div>
+                        <div class="text-4xl font-black text-white font-mono mt-1" v-text="stats.total_runs"></div>
+                    </div>
+                </div>
+                
+                <div class="glass-panel flex-1 rounded-xl p-4 flex flex-col">
+                    <div class="text-xs font-mono text-gray-500 mb-2">SYSTEM LOGS</div>
+                    <div class="flex-1 overflow-y-auto font-mono text-xs space-y-1 text-gray-400" id="sysLog">
+                        <div v-for="(log, i) in systemLogs" :key="i">
+                            <span class="text-gray-600 mr-2" v-text="log.time"></span>
+                            <span :class="log.color" v-text="log.msg"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Monitor Modal Overlay -->
+        <div v-if="monitoringSpider" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+            <div class="w-full max-w-5xl h-[85vh] glass-panel bg-cyber-black rounded-2xl flex flex-col shadow-2xl border border-cyber-neon/20 overflow-hidden animate-in fade-in zoom-in duration-200">
+                
+                <!-- Modal Header -->
+                <div class="h-14 border-b border-white/10 flex items-center justify-between px-6 bg-cyber-panel/50">
+                    <div class="flex items-center gap-3">
+                        <i class="fa-solid fa-terminal text-cyber-neon"></i>
+                        <span class="font-mono font-bold text-lg text-white" v-text="monitoringSpider"></span>
+                        <span v-if="monitorData.is_running" class="text-[10px] bg-cyber-green/20 text-cyber-green px-2 py-0.5 rounded border border-cyber-green/30 animate-pulse">RUNNING</span>
+                        <span v-else class="text-[10px] bg-gray-800 text-gray-400 px-2 py-0.5 rounded">STOPPED</span>
+                    </div>
+                    <button @click="closeMonitor" class="text-gray-400 hover:text-white transition-colors">
+                        <i class="fa-solid fa-xmark text-xl"></i>
+                    </button>
+                </div>
+
+                <div class="flex-1 flex overflow-hidden">
+                    <!-- Progress Section -->
+                    <div class="w-1/4 border-r border-white/10 p-6 flex flex-col gap-6 bg-black/20">
+                        <div>
+                            <div class="text-xs text-gray-500 font-mono mb-2 uppercase">Current Progress</div>
+                            <div class="relative w-full aspect-square flex items-center justify-center">
+                                <!-- Simple Circular Progress using SVG -->
+                                <svg class="w-full h-full transform -rotate-90">
+                                    <circle cx="50%" cy="50%" r="40%" stroke="#1f2937" stroke-width="10" fill="transparent"/>
+                                    <circle cx="50%" cy="50%" r="40%" stroke="#00f3ff" stroke-width="10" fill="transparent"
+                                            :stroke-dasharray="251" :stroke-dashoffset="251 - (251 * monitorData.progress / 100)"
+                                            class="transition-all duration-1000 ease-out"/>
+                                </svg>
+                                <div class="absolute flex flex-col items-center">
+                                    <span class="text-3xl font-black text-white" v-text="monitorData.progress + '%'"></span>
+                                    <span class="text-[10px] text-cyber-neon" v-text="monitorData.status_text"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4 font-mono text-sm">
+                            <div class="flex justify-between border-b border-white/5 pb-2">
+                                <span class="text-gray-500">Current Step</span>
+                                <span class="text-white" v-text="monitorData.current_step"></span>
+                            </div>
+                            <div class="flex justify-between border-b border-white/5 pb-2">
+                                <span class="text-gray-500">Total Steps</span>
+                                <span class="text-white" v-text="monitorData.total_steps"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Terminal Section -->
+                    <div class="flex-1 bg-black p-4 overflow-hidden flex flex-col">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-xs text-gray-500 font-mono">REAL-TIME LOGS (TAIL)</span>
+                            <div class="flex gap-2">
+                                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                                <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                            </div>
+                        </div>
+                        <div ref="terminalContent" class="flex-1 overflow-y-auto terminal-log text-xs text-gray-300 p-2 border border-white/10 rounded" v-html="formattedLogs"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, computed, watch, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const spiders = ref([]);
+                const selected = ref([]);
+                const stats = ref({ total_items: 0, total_runs: 0 });
+                const systemLogs = ref([]);
+                const currentTime = ref('');
+                
+                // Monitor State
+                const monitoringSpider = ref(null);
+                const monitorData = ref({ 
+                    progress: 0, 
+                    logs: '', 
+                    is_running: false, 
+                    current_step: 0, 
+                    total_steps: 0, 
+                    status_text: 'Idle' 
+                });
+                const terminalContent = ref(null);
+                let monitorInterval = null;
+
+                const addLog = (msg, type='info') => {
+                    const colors = { info: 'text-gray-400', success: 'text-cyber-green', error: 'text-cyber-red' };
+                    systemLogs.value.unshift({ time: new Date().toLocaleTimeString(), msg, color: colors[type] });
+                };
+
+                const fetchData = async () => {
+                    try {
+                        const [resSpiders, resStats] = await Promise.all([
+                            fetch('/api/spiders'),
+                            fetch('/api/dashboard/stats')
+                        ]);
+                        const dSpiders = await resSpiders.json();
+                        const dStats = await resStats.json();
+                        spiders.value = dSpiders.spiders;
+                        stats.value = dStats;
+                    } catch(e) { console.error(e); }
+                };
+
+                // Monitor Logic
+                const openMonitor = (name) => {
+                    monitoringSpider.value = name;
+                    monitorData.value = { progress: 0, logs: 'Loading...', is_running: false };
+                    pollMonitor();
+                    monitorInterval = setInterval(pollMonitor, 2000); // 2s poll
+                };
+
+                const closeMonitor = () => {
+                    monitoringSpider.value = null;
+                    if (monitorInterval) clearInterval(monitorInterval);
+                };
+
+                const pollMonitor = async () => {
+                    if (!monitoringSpider.value) return;
+                    try {
+                        const res = await fetch(`/api/spider/${monitoringSpider.value}/monitor`);
+                        const data = await res.json();
+                        monitorData.value = data;
+                        
+                        // Auto scroll terminal
+                        nextTick(() => {
+                            if (terminalContent.value) {
+                                terminalContent.value.scrollTop = terminalContent.value.scrollHeight;
+                            }
+                        });
+                    } catch(e) { console.error(e); }
+                };
+
+                // Format logs with colors
+                const formattedLogs = computed(() => {
+                    if (!monitorData.value.logs) return '';
+                    let html = monitorData.value.logs;
+                    // XSS Warning: In prod, verify logs are safe. Here assuming backend text is safe.
+                    html = html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    html = html.replace(/INFO/g, '<span class="log-info">INFO</span>');
+                    html = html.replace(/WARNING/g, '<span class="log-warn">WARNING</span>');
+                    html = html.replace(/ERROR/g, '<span class="log-error">ERROR</span>');
+                    html = html.replace(/🚀/g, '🚀'); 
+                    html = html.replace(/(\d+\/\d+)/g, '<span class="log-highlight">$1</span>'); // Highlight progress
+                    return html;
+                });
+
+                // Control Actions
+                const startSelected = async () => {
+                    addLog(`Starting ${selected.value.length} spiders...`, 'info');
+                    await fetch('/api/start', { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ spiders: selected.value }) 
+                    });
+                    fetchData();
+                };
+
+                const stopSelected = async () => {
+                    addLog(`Stopping tasks...`, 'info');
+                    await fetch('/api/stop', { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ spiders: selected.value }) 
+                    });
+                    fetchData();
+                };
+                
+                const resetDatabase = async () => {
+                    if(!confirm('Reset DB?')) return;
+                    await fetch('/api/db/reset', { method: 'POST' });
+                    fetchData();
+                };
+
+                const toggleSelect = (name) => {
+                    if (selected.value.includes(name)) selected.value = selected.value.filter(n=>n!==name);
+                    else selected.value.push(name);
+                };
+                const selectAll = () => selected.value = spiders.value.map(s=>s.name);
+
+                onMounted(() => {
+                    fetchData();
+                    setInterval(fetchData, 3000);
+                    setInterval(() => currentTime.value = new Date().toLocaleTimeString(), 1000);
+                });
+
+                return {
+                    spiders, stats, selected, systemLogs, currentTime,
+                    monitoringSpider, monitorData, terminalContent, formattedLogs,
+                    startSelected, stopSelected, resetDatabase,
+                    toggleSelect, selectAll, openMonitor, closeMonitor,
+                    hasSelection: computed(() => selected.value.length > 0)
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

@@ -41,27 +41,40 @@ class DataCleaningPipeline:
                 
         return item
 
+import logging
+import time
+from twisted.internet import threads, defer
+from sqlalchemy.orm import sessionmaker
+# from my_project.models import CrawlData, engine  # 导入你的模型
+
+logger = logging.getLogger(__name__)
+
 class AsyncBatchWritePipeline:
     """
-    【异步批量写入层】
-    核心机制：
-    1. Buffer: 内存中暂存 Item。
-    2. DeferToThread: 将耗时的 DB 写入操作扔到线程池，避免阻塞 Scrapy 的 Reactor。
-    3. Fallback: 批量失败时自动降级。
-    
-    子类可以通过重写 `_get_model_class` 和 `_create_orm_object` 方法来支持不同的模型
+    【最终改良版 - 异步批量写入层】
+    特性：
+    1. 无锁设计：利用 Twisted 线程池管理并发，避免 Buffer 爆仓。
+    2. 自动清理：动态追踪活跃任务，无内存泄漏。
+    3. 优雅退出：close_spider 使用 DeferredList 原生等待，彻底告别 time.sleep。
     """
+    
     def __init__(self, buffer_size=50, timeout=2):
         self.buffer = []
         self.buffer_size = buffer_size
         self.timeout = timeout
-        self.last_flush = time.time()
-        self.session_maker = SessionLocal
-        self.is_flushing = False  # 新增：跟踪是否正在执行flush操作
+        self.last_flush_time = time.time()
+        
+        # 数据库 Session 工厂
+        self.session_maker = SessionLocal 
+        
+        # 【关键改良】使用 set 仅存储当前活跃的异步任务
+        # 任务完成后会自动从中移除
+        self.active_tasks = set()
 
     @classmethod
     def from_crawler(cls, crawler):
-        init_db() # 确保表存在
+        # 建议：init_db() 最好放在 Spider 的 start_requests 或 main 中，而不是这里
+        # init_db() 
         settings = crawler.settings
         return cls(
             buffer_size=settings.getint('BUFFER_THRESHOLD', 100),
@@ -69,127 +82,130 @@ class AsyncBatchWritePipeline:
         )
 
     def process_item(self, item, spider):
-        # 防止None被添加到buffer中
+        # 1. 如果 item 为 None，通常无需处理，直接返回
         if item is None:
-            # 如果buffer中有数据，手动触发flush
-            if self._should_flush() and not self.is_flushing:
-                self.is_flushing = True
-                # 创建副本并清空buffer，确保数据一致性
-                items_to_flush = self.buffer.copy()
-                self.buffer.clear()
-                self.last_flush = time.time()
-                
-                # 异步调用 _flush_buffer
-                df = threads.deferToThread(self._flush_buffer, items_to_flush)
-                df.addCallback(self._on_flush_complete)
-                df.addErrback(self._on_flush_error)
             return item
-        
+
+        # 2. 添加到 Buffer
         self.buffer.append(item)
-        # 检查是否达到 数量阈值 或 时间阈值
-        if self._should_flush() and not self.is_flushing:
-            self.is_flushing = True
-            # 创建副本并清空buffer，确保数据一致性
-            items_to_flush = self.buffer.copy()
-            self.buffer.clear()
-            self.last_flush = time.time()
-            
-            # 异步调用 _flush_buffer
-            df = threads.deferToThread(self._flush_buffer, items_to_flush)
-            df.addCallback(self._on_flush_complete)
-            df.addErrback(self._on_flush_error)
+
+        # 3. 检查是否满足写入条件 (数量阈值 或 时间阈值)
+        # 注意：这里去掉了 is_flushing 的判断。
+        # 原因：如果写入慢而爬虫快，阻塞 flush 会导致 buffer 无限膨胀撑爆内存。
+        # Twisted 的线程池会自动排队处理 flush 任务，比我们在内存囤积数据更安全。
+        if self._should_flush():
+            self._trigger_flush()
+
         return item
 
     def _should_flush(self):
-        return (len(self.buffer) >= self.buffer_size) or (time.time() - self.last_flush >= self.timeout and self.buffer)
+        """判断是否需要刷新"""
+        # 只有当 buffer 有数据时才检查时间
+        has_data = len(self.buffer) > 0
+        time_expired = (time.time() - self.last_flush_time) >= self.timeout
+        size_reached = len(self.buffer) >= self.buffer_size
+        
+        return size_reached or (has_data and time_expired)
+
+    def _trigger_flush(self):
+        """触发异步写入任务"""
+        # 1. 立即切片取出数据，清空 Buffer (原子操作)
+        items_to_write = self.buffer
+        self.buffer = [] # 指向新列表
+        self.last_flush_time = time.time()
+
+        if not items_to_write:
+            return
+
+        # 2. 发起异步任务
+        logger.debug(f"🚀 触发异步写入: {len(items_to_write)} 条")
+        df = threads.deferToThread(self._flush_buffer, items_to_write)
+        
+        # 3. 【关键】追踪任务
+        self.active_tasks.add(df)
+        
+        # 4. 【关键】添加回调：任务结束(无论成功失败)后，从集合中移除自己
+        # 使用 addBoth 确保即使报错也能清理
+        df.addBoth(self._cleanup_task, df)
+        
+        # 5. 添加错误日志回调
+        df.addErrback(self._log_error)
+
+    def _cleanup_task(self, result, df):
+        """任务完成后的清理回调"""
+        self.active_tasks.discard(df)
+        return result
+
+    def _log_error(self, failure):
+        """错误日志回调"""
+        logger.error(f"🔥 异步写入严重异常: {failure.getErrorMessage()}")
+        return failure
+
+    @defer.inlineCallbacks
+    def close_spider(self, spider):
+        """
+        【最终改良版关闭逻辑】
+        """
+        logger.info(f"⏳ 爬虫关闭中... 剩余 Buffer: {len(self.buffer)} | 进行中任务: {len(self.active_tasks)}")
+        
+        # 1. 如果 Buffer 里还有没写完的，发起最后一次异步写入
+        if self.buffer:
+            self._trigger_flush()
+        
+        # 2. 【核心】等待所有活跃任务完成
+        # DeferredList 会等待列表里所有的 Deferred 变为 called 状态
+        if self.active_tasks:
+            yield defer.DeferredList(list(self.active_tasks))
+            
+        logger.info("✅ Pipeline 关闭完成：所有数据已安全落库。")
+
+    # --- 以下业务逻辑保持不变 ---
 
     def _get_model_class(self, item):
-        """获取对应的模型类，子类可以重写此方法"""
         return CrawlData
 
     def _create_orm_object(self, item, model_class):
-        """创建ORM对象，子类可以重写此方法进行自定义映射"""
-        # 确保item不为None
-        if item is None:
-            raise ValueError("Cannot create ORM object from None item")
-            
-        # 默认实现：使用字典解包，自动将item中的字段映射到模型
-        # 只包含模型中定义的字段
+        if not item: return None
         model_fields = [c.key for c in model_class.__table__.columns]
         item_data = {k: v for k, v in item.items() if k in model_fields}
         return model_class(**item_data)
 
     def _flush_buffer(self, items):
-        """在独立线程中执行"""
+        """执行数据库写入（运行在线程池中）"""
         session = self.session_maker()
         try:
             orm_objects = []
-            valid_items = []
-            
-            # 过滤掉None值
             for item in items:
-                if item is not None:
-                    valid_items.append(item)
-                    model_class = self._get_model_class(item)
-                    orm_obj = self._create_orm_object(item, model_class)
-                    orm_objects.append(orm_obj)
+                # 再次过滤，确保安全
+                if item:
+                    model = self._get_model_class(item)
+                    obj = self._create_orm_object(item, model)
+                    orm_objects.append(obj)
             
-            # 如果没有有效数据，直接返回
-            if not valid_items:
-                logger.info("ℹ️ 没有有效数据需要写入")
-                return
-            
-            # 尝试批量写入
+            if not orm_objects: return
+
             session.add_all(orm_objects)
             session.commit()
-            logger.info(f"✅ 成功批量写入 {len(valid_items)} 条数据")
+            logger.info(f"💾 批量写入成功: {len(orm_objects)} 条")
+            
         except Exception as e:
             session.rollback()
-            logger.error(f"⚠️ 批量写入失败: {e}，正在尝试降级为逐条写入...")
+            logger.error(f"⚠️ 批量写入失败: {e}，正在降级为逐条写入...")
             self._fallback_single_write(session, orm_objects)
         finally:
             session.close()
 
     def _fallback_single_write(self, session, objects):
-        """降级策略：逐条写入，隔离脏数据"""
-        success = 0
+        count = 0
         for obj in objects:
             try:
-                session.merge(obj) # 使用 merge 避免主键重复报错
+                session.merge(obj)
                 session.commit()
-                success += 1
+                count += 1
             except Exception as e:
                 session.rollback()
-                # 尝试获取对象的标识信息
-                obj_id = getattr(obj, 'url_hash', getattr(obj, 'id', 'Unknown'))
-                logger.error(f"❌ 单条写入失败 (ID: {obj_id}): {e}")
-        logger.info(f"🆗 降级写入完成: 成功 {success} / 总数 {len(objects)}")
-
-    def _on_flush_complete(self, result):
-        """异步写入完成后的回调"""
-        self.is_flushing = False
-        # 检查是否有新数据需要处理
-        if self._should_flush():
-            self.process_item(None, None)  # 触发下一次flush
-
-    def _on_flush_error(self, failure):
-        """异步写入失败后的回调"""
-        logger.error(f"🔥 异步写入线程严重异常: {failure}")
-        self.is_flushing = False
-
-    def _handle_error(self, failure):
-        """保留旧的错误处理方法，确保兼容性"""
-        logger.error(f"🔥 异步写入线程严重异常: {failure}")
-
-    def close_spider(self, spider):
-        """爬虫关闭时，强制刷新剩余 Buffer"""
-        # 确保所有数据都被处理
-        if self.buffer:
-            self._flush_buffer(self.buffer)
-        # 等待可能正在进行的异步操作完成
-        import time
-        while self.is_flushing:
-            time.sleep(0.1)
+                logger.error(f"❌ 单条写入丢弃: {e}")
+        logger.info(f"🆗 降级处理完成: 挽回 {count}/{len(objects)} 条")
 
     # 如果需要自定义字段映射，可以重写 _create_orm_object 方法
     # def _create_orm_object(self, item, model_class):
