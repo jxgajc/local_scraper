@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from datetime import datetime
 
 # 💡 Debug提示: 将 echo=False 改为 True 可以查看生成的 SQL 语句
+# 这里的默认值仅作为 Fallback，实际应通过环境变量或 settings.py 配置
 DATABASE_URL = os.getenv('DATABASE_URL', 'mysql+pymysql://xf:xf666@192.168.0.141:3306/spiderweb')
 
 engine = create_engine(

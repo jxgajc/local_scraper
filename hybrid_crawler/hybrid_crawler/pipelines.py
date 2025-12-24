@@ -3,9 +3,11 @@ import time
 import hashlib
 from twisted.internet import threads
 from itemadapter import ItemAdapter
+from sqlalchemy.sql import func # 新增
 from .models import SessionLocal, init_db
 from .models.crawl_data import CrawlData
 from .models.crawl_status import CrawlStatus
+from .models.spider_progress import SpiderProgress # 新增
 from .models.fujian_drug import FujianDrug
 from .models.hainan_drug import HainanDrug
 from .models.hebei_drug import HebeiDrug
@@ -272,25 +274,23 @@ class CrawlStatusPipeline:
     爬虫状态记录管道
     用于记录每个爬虫的采集过程和参数，用于数据完整性验证
     接收特殊的状态item，格式为 {'_status_': True, ...}
-    """
-    def __init__(self):
-        self.session = SessionLocal()
     
-    @classmethod
-    def from_crawler(cls, crawler):
-        init_db()
-        return cls()
+    【改良版】：使用 deferToThread 异步写入，避免阻塞 Reactor
+    """
     
     def process_item(self, item, spider):
         # 检查是否为状态记录item
         if isinstance(item, dict) and item.get('_status_'):
-            self._save_status(item, spider)
-            return item
+            # 返回 Deferred，Scrapy 会等待其完成
+            return threads.deferToThread(self._save_status, item, spider)
         return item
     
     def _save_status(self, status_item, spider):
-        """保存采集状态"""
+        """保存采集状态 (运行在线程池中)"""
+        # 每个线程独立的 Session
+        session = SessionLocal()
         try:
+            # 1. 保存历史审计日志 (Append Only)
             status = CrawlStatus(
                 spider_name=status_item.get('spider_name', spider.name),
                 crawl_id=status_item.get('crawl_id'),
@@ -307,12 +307,58 @@ class CrawlStatusPipeline:
                 parent_crawl_id=status_item.get('parent_crawl_id'),
                 reference_id=status_item.get('reference_id')
             )
-            self.session.add(status)
-            self.session.commit()
+            session.add(status)
+            
+            # 2. 更新实时进度 (Upsert)
+            self._update_progress(session, status_item, spider)
+            
+            session.commit()
         except Exception as e:
-            self.session.rollback()
+            session.rollback()
             logger.error(f"❌ 保存采集状态失败: {e}")
-    
+        finally:
+            session.close()
+            
+        # 必须返回 item 以供后续 Pipeline 使用
+        return status_item
+        
+    def _update_progress(self, session, item, spider):
+        """更新爬虫实时进度表"""
+        try:
+            spider_name = item.get('spider_name', spider.name)
+            
+            # 尝试查询现有记录
+            progress = session.query(SpiderProgress).filter_by(spider_name=spider_name).first()
+            if not progress:
+                progress = SpiderProgress(spider_name=spider_name)
+                session.add(progress)
+            
+            # 更新字段
+            progress.run_id = item.get('crawl_id', 'unknown')
+            progress.status = 'running' if item.get('success', True) else 'error'
+            
+            # 计算进度
+            page = item.get('page_no', 1)
+            total = item.get('total_pages', 0)
+            
+            progress.total_tasks = total
+            progress.completed_tasks = page
+            if total > 0:
+                progress.progress_percent = round((page / total) * 100, 2)
+                
+            progress.current_stage = item.get('stage', 'unknown')
+            progress.items_scraped = session.query(CrawlStatus).filter_by(spider_name=spider_name).with_entities(func.sum(CrawlStatus.items_stored)).scalar() or 0
+            
+            # 构造分层描述信息
+            desc = f"Stage: {progress.current_stage}"
+            if total > 0:
+                desc += f" | Page {page}/{total}"
+            if item.get('error_message'):
+                desc += f" | Error: {item.get('error_message')}"
+            progress.current_item = desc
+            
+        except Exception as e:
+            logger.error(f"⚠️ 更新实时进度失败: {e}")
+
     def close_spider(self, spider):
-        """关闭数据库会话"""
-        self.session.close()
+        pass

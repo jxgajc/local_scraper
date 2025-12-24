@@ -35,12 +35,14 @@ if project_root not in sys.path:
 try:
     from hybrid_crawler.models import Base, init_db, SessionLocal
     from hybrid_crawler.models.crawl_status import CrawlStatus
+    from hybrid_crawler.models.spider_progress import SpiderProgress # 新增
     from run import SPIDER_MAP
 except ImportError as e:
     print(f"⚠️ 导入警告: {e}")
     SPIDER_MAP = {}
     SessionLocal = None
     CrawlStatus = None
+    SpiderProgress = None
 
 app = FastAPI(title="Crawler Command Center")
 templates = Jinja2Templates(directory=template_path)
@@ -118,21 +120,23 @@ async def get_spiders():
     spiders_list = []
     db = SessionLocal() if SessionLocal else None
     
-    for name in SPIDER_MAP.keys():
-        status = "stopped"
-        pid = None
-        
-        if name in RUNNING_PROCESSES:
-            proc = RUNNING_PROCESSES[name]
-            if proc.poll() is None:
-                status = "running"
-                pid = proc.pid
-            else:
-                del RUNNING_PROCESSES[name]
-        
-        last_stats = {}
-        if db and CrawlStatus:
-            try:
+    try:
+        for name in SPIDER_MAP.keys():
+            status = "stopped"
+            pid = None
+            
+            # 1. 检查进程状态
+            if name in RUNNING_PROCESSES:
+                proc = RUNNING_PROCESSES[name]
+                if proc.poll() is None:
+                    status = "running"
+                    pid = proc.pid
+                else:
+                    del RUNNING_PROCESSES[name]
+            
+            # 2. 从 DB 获取最后一次运行统计
+            last_stats = {}
+            if db and CrawlStatus:
                 latest_log = db.query(CrawlStatus).filter(
                     CrawlStatus.spider_name == name
                 ).order_by(desc(CrawlStatus.start_time)).first()
@@ -141,16 +145,30 @@ async def get_spiders():
                         "items": latest_log.items_stored,
                         "last_run": latest_log.start_time.strftime("%Y-%m-%d %H:%M") if latest_log.start_time else "-"
                     }
-            except: pass
+            
+            # 3. 尝试从实时进度表获取更准确的状态
+            if db and SpiderProgress:
+                progress = db.query(SpiderProgress).filter_by(spider_name=name).first()
+                if progress:
+                     # 如果进程在跑，但 DB 显示 error，可能需要注意
+                     if status == "running" and progress.status == "error":
+                         status = "warning"
+                     # 如果 DB 显示 running 但进程没了，那是意外退出
+                     elif status == "stopped" and progress.status == "running":
+                         # 这里可以尝试重置 DB 状态，或者显示 "dead"
+                         pass
+                     
+                     if progress.progress_percent > 0:
+                         last_stats["progress"] = f"{progress.progress_percent}%"
 
-        spiders_list.append({
-            "name": name, 
-            "status": status, 
-            "pid": pid,
-            "stats": last_stats
-        })
-    
-    if db: db.close()
+            spiders_list.append({
+                "name": name, 
+                "status": status, 
+                "pid": pid,
+                "stats": last_stats
+            })
+    finally:
+        if db: db.close()
     return {"spiders": spiders_list}
 
 @app.post("/api/start")
@@ -207,29 +225,46 @@ async def get_spider_monitor(name: str):
     """获取单个爬虫的实时监控数据（日志+进度）"""
     log_file = os.path.join(log_dir, f"{name}.log")
     
-    # 1. 读取日志 (读取最后 10KB)
+    # 1. 读取日志 (读取最后 10KB) - 保持不变，用于 Debug
     log_content = ""
     if os.path.exists(log_file):
         try:
             with open(log_file, 'rb') as f:
-                # 移动到文件末尾
                 f.seek(0, 2)
                 file_size = f.tell()
-                # 设定读取的字节数，比如 10KB
                 read_size = 1024 * 10
                 if file_size > read_size:
                     f.seek(file_size - read_size)
                 else:
                     f.seek(0)
-                # 读取并解码，忽略解码错误
                 log_content = f.read().decode('utf-8', errors='ignore')
         except Exception as e:
             log_content = f"Error reading log: {e}"
     else:
         log_content = "Waiting for logs... (Log file not created yet)"
 
-    # 2. 分析进度
-    progress, current, total, status_text = LogParser.parse_progress(name, log_content)
+    # 2. 从 DB 获取精准进度
+    progress = 0
+    current = 0
+    total = 0
+    status_text = "Initializing..."
+    
+    if SessionLocal and SpiderProgress:
+        db = SessionLocal()
+        try:
+            sp = db.query(SpiderProgress).filter_by(spider_name=name).first()
+            if sp:
+                progress = sp.progress_percent
+                current = sp.completed_tasks
+                total = sp.total_tasks
+                status_text = sp.current_item or sp.status
+        except Exception as e:
+            status_text = f"DB Error: {str(e)}"
+        finally:
+            db.close()
+    else:
+        # Fallback to log parser if DB not available
+        progress, current, total, status_text = LogParser.parse_progress(name, log_content)
     
     # 3. 判断运行状态
     is_running = False

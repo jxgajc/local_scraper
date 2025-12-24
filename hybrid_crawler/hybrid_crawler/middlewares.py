@@ -43,8 +43,12 @@ class SmartRetryMiddleware(RetryMiddleware):
         if isinstance(exception, self.NETWORK_ERRORS):
             delay = 2 ** (retry_times - 1)
             logger.warning(f"⚠️ 网络波动 ({exception}), {delay}s 后重试: {request.url}")
-            time.sleep(delay) # 注意：这里简单的sleep会阻塞线程，生产环境建议使用 twisted 的 callLater，此处为演示逻辑
-            return self._retry(request, exception, spider)
+            # 改良：不要使用 time.sleep(delay)，这会阻塞 reactor。
+            # 正确做法是设置 download_delay，让 Scrapy 的调度器去等待。
+            new_request = self._retry(request, exception, spider)
+            if new_request:
+                new_request.meta['download_delay'] = delay
+            return new_request
             
         # 策略 2: 逻辑/渲染错误 -> 净室重试 (Clean Slate)
         elif isinstance(exception, self.LOGIC_ERRORS):
