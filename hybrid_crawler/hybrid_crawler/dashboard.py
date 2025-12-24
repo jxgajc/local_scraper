@@ -249,6 +249,7 @@ async def get_spider_monitor(name: str):
     total = 0
     status_text = "Initializing..."
     last_status_detail = {}
+    task_tree = []
     
     if SessionLocal and SpiderProgress:
         db = SessionLocal()
@@ -261,20 +262,105 @@ async def get_spider_monitor(name: str):
                 total = sp.total_tasks
                 status_text = sp.current_item or sp.status
             
-            # 详细状态信息 (API, Params)
+            # --- 构建任务树 (Task Tree) ---
             if CrawlStatus:
-                latest_status = db.query(CrawlStatus).filter_by(spider_name=name).order_by(desc(CrawlStatus.id)).first()
-                if latest_status:
-                    last_status_detail = {
-                        "api_url": latest_status.api_url,
-                        "params": latest_status.params, # JSON field usually
-                        "stage": latest_status.stage,
-                        "items_found": latest_status.items_found,
-                        "items_stored": latest_status.items_stored,
-                        "success": latest_status.success,
-                        "error_message": latest_status.error_message,
-                        "timestamp": latest_status.create_time.strftime("%H:%M:%S") if latest_status.create_time else ""
+                # 获取最近的 100 条记录
+                recent_logs = db.query(CrawlStatus).filter_by(spider_name=name)\
+                    .order_by(desc(CrawlStatus.id)).limit(200).all()
+                
+                # 1. 将记录按 parent_crawl_id 分组
+                nodes = {}
+                children_map = {}
+                
+                for log in recent_logs:
+                    # 简化节点信息
+                    node = {
+                        "id": log.crawl_id,
+                        "parent_id": log.parent_crawl_id,
+                        "stage": log.stage,
+                        "status": "success" if log.success else "error",
+                        "progress": f"{log.page_no}/{log.total_pages}" if log.total_pages > 0 else f"{log.page_no}",
+                        "info": f"Found: {log.items_found} | Stored: {log.items_stored}",
+                        "timestamp": log.start_time.strftime("%H:%M:%S") if log.start_time else "",
+                        "error": log.error_message,
+                        "children": []
                     }
+                    nodes[log.crawl_id] = node
+                    
+                    pid = log.parent_crawl_id
+                    if pid:
+                        if pid not in children_map: children_map[pid] = []
+                        children_map[pid].append(node)
+                
+                # 2. 组装树 (自底向上或者自顶向下)
+                # 由于我们只查了最近 N 条，可能找不到 Root，所以我们将所有 parent_id 在本次查询中找不到的节点视为 "Visible Root"
+                
+                visible_roots = []
+                for log in recent_logs:
+                    node = nodes[log.crawl_id]
+                    # 如果有子节点，挂载上去
+                    if log.crawl_id in children_map:
+                        node['children'] = children_map[log.crawl_id]
+                    
+                    # 判断是否为当前视图的根
+                    # 如果没有 parent_id，或者 parent_id 不在本次查出来的节点中
+                    if not log.parent_crawl_id or log.parent_crawl_id not in nodes:
+                        visible_roots.append(node)
+                
+                # 去重 (因为 recent_logs 是按 ID 倒序的，我们可能重复添加了)
+                # 这里的逻辑有点乱，简化一下：
+                # 我们只遍历 visible_roots，但是 visible_roots 可能包含同一个树的多个分支（如果根节点太老没查出来）
+                # 为了展示美观，我们只取最顶层的
+                
+                unique_roots = {}
+                for r in visible_roots:
+                    if r['id'] not in unique_roots:
+                        unique_roots[r['id']] = r
+                
+                task_tree = list(unique_roots.values())
+            
+            # 分层状态信息 (保留旧逻辑以兼容)
+            if CrawlStatus:
+                # 1. 列表层 (List Page) - 主任务
+                latest_list = db.query(CrawlStatus).filter_by(spider_name=name, stage='list_page')\
+                    .order_by(desc(CrawlStatus.id)).first()
+                
+                if latest_list:
+                    last_status_detail['list_layer'] = {
+                        "api_url": latest_list.api_url,
+                        "params": latest_list.params,
+                        "items_found": latest_list.items_found,
+                        "items_stored": latest_list.items_stored,
+                        "page_no": latest_list.page_no,
+                        "total_pages": latest_list.total_pages,
+                        "timestamp": latest_list.start_time.strftime("%H:%M:%S") if latest_list.start_time else ""
+                    }
+                
+                # 2. 详情层 (Detail Page) - 子任务
+                latest_detail = db.query(CrawlStatus).filter_by(spider_name=name, stage='detail_page')\
+                    .order_by(desc(CrawlStatus.id)).first()
+                    
+                if latest_detail:
+                    last_status_detail['detail_layer'] = {
+                        "api_url": latest_detail.api_url,
+                        "params": latest_detail.params,
+                        "items_found": latest_detail.items_found,
+                        "items_stored": latest_detail.items_stored,
+                        "page_no": latest_detail.page_no,
+                        "total_pages": latest_detail.total_pages,
+                        "error_message": latest_detail.error_message,
+                        "timestamp": latest_detail.start_time.strftime("%H:%M:%S") if latest_detail.start_time else ""
+                    }
+                
+                # 兼容旧逻辑的 fallback (如果只查到一条，或者作为总体概览)
+                if not latest_list and not latest_detail:
+                     latest_any = db.query(CrawlStatus).filter_by(spider_name=name).order_by(desc(CrawlStatus.id)).first()
+                     if latest_any:
+                         last_status_detail['general'] = {
+                             "stage": latest_any.stage,
+                             "api_url": latest_any.api_url,
+                             "items_stored": latest_any.items_stored
+                         }
 
         except Exception as e:
             status_text = f"DB Error: {str(e)}"
@@ -297,6 +383,7 @@ async def get_spider_monitor(name: str):
         "total_steps": total,
         "status_text": status_text,
         "detail": last_status_detail,
+        "task_tree": task_tree, # 新增任务树
         "logs": log_content
     }
 

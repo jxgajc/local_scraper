@@ -65,9 +65,10 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
     def start_requests(self):
         """遍历关键词发起请求"""
-        self.spider_log.info(f"📋 开始采集，共 {len(self.search_contents)} 个关键词")
+        total_keywords = len(self.search_contents)
+        self.spider_log.info(f"📋 开始采集，共 {total_keywords} 个关键词")
         
-        for content in self.search_contents:
+        for index, content in enumerate(self.search_contents):
             payload = {
                 "verificationCode": self.get_verification_code(),
                 "content": content
@@ -78,7 +79,13 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
                 method='POST',
                 data=payload,
                 callback=self.parse_drug_list,
-                meta={'keyword': content, 'crawl_id': self.crawl_id, 'payload': payload},
+                meta={
+                    'keyword': content, 
+                    'crawl_id': self.crawl_id, 
+                    'payload': payload,
+                    'keyword_index': index + 1,
+                    'total_keywords': total_keywords
+                },
                 dont_filter=True
             )
 
@@ -88,6 +95,10 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
         keyword = response.meta['keyword']
         parent_crawl_id = response.meta['crawl_id']
         current_payload = response.meta['payload']
+        
+        # 使用关键词进度作为任务进度
+        current_page = response.meta['keyword_index']
+        total_pages = response.meta['total_keywords']
         
         try:
             res_json = json.loads(response.text)
@@ -112,10 +123,11 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
             drug_list = data.get("list", [])
             
             if not drug_list:
-                self.spider_log.info(f"📄 关键词 [{keyword}] 未找到药品记录")
+                self.spider_log.info(f"📄 关键词 [{keyword}] ({current_page}/{total_pages}) 未找到药品记录")
                 yield self.report_list_page(
                     crawl_id=page_crawl_id,
-                    page_no=1,
+                    page_no=current_page,
+                    total_pages=total_pages,
                     items_found=0,
                     params=current_payload,
                     api_url=self.drug_list_url,
@@ -124,12 +136,13 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
                 )
                 return
 
-            self.spider_log.info(f"📄 关键词 [{keyword}] 发现 {len(drug_list)} 条药品记录")
+            self.spider_log.info(f"📄 关键词 [{keyword}] ({current_page}/{total_pages}) 发现 {len(drug_list)} 条药品记录")
             
             # 上报页面采集状态
             yield self.report_list_page(
                 crawl_id=page_crawl_id,
-                page_no=1,
+                page_no=current_page,
+                total_pages=total_pages,
                 items_found=len(drug_list),
                 params=current_payload,
                 api_url=self.drug_list_url,
@@ -181,7 +194,8 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
             # 更新页面采集状态
             yield self.report_list_page(
                 crawl_id=page_crawl_id,
-                page_no=1,
+                page_no=current_page,
+                total_pages=total_pages,
                 items_found=len(drug_list),
                 items_stored=item_count,
                 params=current_payload,
@@ -234,16 +248,7 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
             
             self.spider_log.info(f"🏥 药品 [{base_info['gen_name']}] 发现 {len(hosp_list)} 家医院")
             
-            # 上报详情页采集状态
-            yield self.report_detail_page(
-                crawl_id=detail_crawl_id,
-                page_no=1,
-                items_found=len(hosp_list),
-                params=current_payload,
-                api_url=self.hospital_list_url,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=base_info.get('med_id')
-            )
+            # 优化：移除冗余状态上报
 
             item_count = 0
             if hosp_list:

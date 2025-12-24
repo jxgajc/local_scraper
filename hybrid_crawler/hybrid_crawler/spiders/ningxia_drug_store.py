@@ -186,16 +186,7 @@ class NingxiaDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             
             self.spider_log.info(f"🏥 药品 [{drug_info.get('productName')}] 详情页 [{current_detail_page}/{total_detail_pages}] - 发现 {len(hospitals)} 家医院")
 
-            yield self.report_detail_page(
-                crawl_id=detail_crawl_id,
-                page_no=current_detail_page,
-                total_pages=total_detail_pages,
-                items_found=len(hospitals),
-                params=current_payload,
-                api_url=self.hospital_api_url,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=response.meta['procure_id']
-            )
+            # 优化：移除冗余状态上报
 
             item_count = 0
             # 遍历当前页的医院，生成最终数据

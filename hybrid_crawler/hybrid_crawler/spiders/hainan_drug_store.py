@@ -251,17 +251,7 @@ class HainanDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
             self.spider_log.info(f"🏥 药品 [{prod_name}] 详情页面 [{current_page}/{total_pages}] - 发现 {len(records)} 条门店记录")
             
-            yield self.report_detail_page(
-                crawl_id=detail_crawl_id,
-                page_no=current_page,
-                items_found=len(records),
-                params={'drugCode': drug_code, 'current': current_page},
-                api_url=self.detail_api_base,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=drug_code,
-                total_pages=total_pages,
-                page_size=page_size
-            )
+            # 优化：移除冗余状态上报
 
             item_count = 0
             if records:

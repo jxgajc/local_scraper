@@ -358,16 +358,7 @@ class ShandongDrugSpider(SpiderStatusMixin, scrapy.Spider):
             
             self.spider_log.info(f"🏥 药品 [{base_info['prodName']}] 详情页 [{current_page}/{total_pages}] - 发现 {len(records)} 家医院")
             
-            yield self.report_detail_page(
-                crawl_id=detail_crawl_id,
-                page_no=current_page,
-                total_pages=total_pages,
-                items_found=len(records),
-                params=current_payload,
-                api_url=self.hospital_api_url,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=prod_code
-            )
+            # 优化：移除冗余状态上报
 
             item_count = 0
             if not records:

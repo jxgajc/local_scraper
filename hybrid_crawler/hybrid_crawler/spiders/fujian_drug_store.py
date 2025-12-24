@@ -221,7 +221,8 @@ class FujianDrugSpider(SpiderStatusMixin, scrapy.Spider):
                     api_url=self.hospital_api_url,
                     parent_crawl_id=parent_crawl_id,
                     reference_id=base_info['ext_code'],
-                    items_stored=1
+                    items_stored=1,
+                    total_pages=1
                 )
                 
                 item = FujianDrugItem()
@@ -241,17 +242,8 @@ class FujianDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
             self.spider_log.info(f"🏥 药品 [{drug_name}] 医院列表 [{current_page}/{total_pages}] - 发现 {len(hospitals)} 条医院记录")
             
-            yield self.report_detail_page(
-                crawl_id=hospital_crawl_id,
-                page_no=current_page,
-                items_found=len(hospitals),
-                params=current_payload,
-                api_url=self.hospital_api_url,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=base_info['ext_code'],
-                total_pages=total_pages,
-                page_size=page_size
-            )
+            # 优化：移除这里冗余的 report_detail_page 调用，只在最后处理完数据后上报一次
+            # 减少数据库并发压力
 
             item_count = 0
             if hospitals:

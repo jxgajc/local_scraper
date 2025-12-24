@@ -242,7 +242,8 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
                     parent_crawl_id=parent_crawl_id,
                     reference_id=base_info['drug_code'],
                     success=False,
-                    error_message=error_msg
+                    error_message=error_msg,
+                    total_pages=0
                 )
                 return
 
@@ -254,17 +255,7 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
             
             self.spider_log.info(f"🏥 药品 [{drug_name}] 医院列表 [{current_page}/{total_pages}] - 发现 {len(records)} 条医院记录")
             
-            yield self.report_detail_page(
-                crawl_id=hospital_crawl_id,
-                page_no=current_page,
-                items_found=len(records),
-                params=current_payload,
-                api_url=self.hospital_api_url,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=base_info['drug_code'],
-                total_pages=total_pages,
-                page_size=page_size
-            )
+            # 优化：移除冗余状态上报，减少数据库压力
 
             item_count = 0
             if records:

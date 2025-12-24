@@ -2,6 +2,7 @@ import logging
 import time
 from twisted.internet import threads, defer
 from itemadapter import ItemAdapter
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.sql import func
 from .models import SessionLocal
 from .models.crawl_status import CrawlStatus
@@ -215,37 +216,78 @@ class CrawlStatusPipeline:
         return status_item
         
     def _update_progress(self, session, item, spider):
-        """更新爬虫实时进度表"""
+        """
+        更新爬虫实时进度表
+        使用 MySQL 原生 Upsert (INSERT ... ON DUPLICATE KEY UPDATE) 
+        彻底解决并发下的唯一键冲突和事务回滚问题
+        """
         try:
             spider_name = item.get('spider_name', spider.name)
-            progress = session.query(SpiderProgress).filter_by(spider_name=spider_name).first()
-            if not progress:
-                progress = SpiderProgress(spider_name=spider_name)
-                session.add(progress)
+            run_id = item.get('crawl_id', 'unknown')
             
-            progress.run_id = item.get('crawl_id', 'unknown')
-            progress.status = 'running' if item.get('success', True) else 'error'
-            
-            page = item.get('page_no', 1)
-            total = item.get('total_pages', 0)
-            
-            progress.total_tasks = total
-            progress.completed_tasks = page
-            if total > 0:
-                progress.progress_percent = round((page / total) * 100, 2)
-                
-            progress.current_stage = item.get('stage', 'unknown')
-            progress.items_scraped = session.query(CrawlStatus).filter_by(spider_name=spider_name).with_entities(func.sum(CrawlStatus.items_stored)).scalar() or 0
-            
-            desc = f"Stage: {progress.current_stage}"
-            if total > 0:
-                desc += f" | Page {page}/{total}"
+            # 1. 准备数据字典
+            data = {
+                'spider_name': spider_name,
+                'run_id': run_id,
+                'status': 'running' if item.get('success', True) else 'error',
+                'completed_tasks': item.get('page_no', 1),
+                'total_tasks': item.get('total_pages', 0),
+                'current_stage': item.get('stage', 'unknown'),
+                'updated_at': func.now()
+            }
+
+            # 2. 计算进度百分比
+            if data['total_tasks'] > 0:
+                data['progress_percent'] = round((data['completed_tasks'] / data['total_tasks']) * 100, 2)
+            else:
+                data['progress_percent'] = 0.0
+
+            # 3. 计算 items_scraped (仍然需要查询一次，但这是读操作，不会锁表太久)
+            # 注意：如果对性能要求极高，可以改为 Redis 计数或增量更新
+            total_items = session.query(func.sum(CrawlStatus.items_stored))\
+                .filter(CrawlStatus.spider_name == spider_name).scalar() or 0
+            data['items_scraped'] = total_items
+
+            # 4. 构建描述信息
+            desc = f"Stage: {data['current_stage']}"
+            if data['total_tasks'] > 0:
+                desc += f" | Page {data['completed_tasks']}/{data['total_tasks']}"
             if item.get('error_message'):
                 desc += f" | Error: {item.get('error_message')}"
-            progress.current_item = desc
+            data['current_item'] = desc
+
+            # 5. 执行原子 Upsert
+            stmt = insert(SpiderProgress).values(data)
+            
+            # 指定发生冲突时需要更新的字段
+            # 注意：spider_name 是唯一键，作为冲突判断依据
+            update_dict = {
+                'run_id': stmt.inserted.run_id,
+                'status': stmt.inserted.status,
+                'current_stage': stmt.inserted.current_stage,
+                'items_scraped': stmt.inserted.items_scraped,
+                'current_item': stmt.inserted.current_item,
+                'updated_at': func.now()
+            }
+
+            # 关键修改：只有 list_page 阶段才更新主进度
+            # 这样可以避免 detail_page 的进度 (如 1/1) 覆盖了 list_page 的总进度 (如 8/33)
+            current_stage = item.get('stage', '')
+            if 'list' in current_stage or current_stage == 'start_requests':
+                 update_dict.update({
+                    'completed_tasks': stmt.inserted.completed_tasks,
+                    'total_tasks': stmt.inserted.total_tasks,
+                    'progress_percent': stmt.inserted.progress_percent,
+                 })
+            
+            upsert_stmt = stmt.on_duplicate_key_update(**update_dict)
+            
+            # 使用 execute 直接执行，绕过 ORM 对象缓存
+            session.execute(upsert_stmt)
             
         except Exception as e:
             logger.error(f"⚠️ 更新实时进度失败: {e}")
+            # 不抛出异常，保证主流程继续
 
     def close_spider(self, spider):
         pass

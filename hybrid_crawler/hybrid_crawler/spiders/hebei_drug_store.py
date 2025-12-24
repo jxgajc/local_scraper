@@ -269,16 +269,7 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             
             self.spider_log.info(f"🏥 药品 [{drug_info.get('prodName')}] 详情页 - 发现 {len(hospital_list)} 家医院记录")
             
-            yield self.report_detail_page(
-                crawl_id=detail_crawl_id,
-                page_no=page_num, # 详情页没有分页，沿用列表页码
-                items_found=len(hospital_list),
-                params=current_payload,
-                api_url=self.hospital_api_url,
-                parent_crawl_id=parent_crawl_id,
-                reference_id=drug_info.get('prodCode'),
-                success=True
-            )
+            # 优化：移除冗余状态上报
 
             # 3. 创建合并后的数据 Item
             item = self._create_item(drug_info, hospital_list, page_num)
@@ -293,7 +284,8 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
                 api_url=self.hospital_api_url,
                 parent_crawl_id=parent_crawl_id,
                 reference_id=drug_info.get('prodCode'),
-                items_stored=1
+                items_stored=1,
+                total_pages=1
             )
 
         except Exception as e:
