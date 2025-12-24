@@ -71,6 +71,9 @@ class NhsaDrugItem(scrapy.Item):
         
         return md5_hash
 
+    def get_model_class(self):
+        return NhsaDrug
+
 
 class NhsaDrug(BaseModel):
     __tablename__ = 'nhsa_drug_test'

@@ -8,13 +8,14 @@ from scrapy.http import JsonRequest
 from ..utils.logger_utils import get_spider_logger
 import pandas as pd
 import os
+from .mixins import SpiderStatusMixin
 
 # 获取脚本所在目录的绝对路径
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 构建Excel文件的绝对路径
 excel_path = os.path.join(script_dir, "../../关键字采集(2).xlsx")
 
-class TianjinDrugSpider(scrapy.Spider):
+class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
     """
     天津市医药采购中心 - 药品及配送医院查询
     Target: https://tps.ylbz.tj.gov.cn
@@ -49,16 +50,12 @@ class TianjinDrugSpider(scrapy.Spider):
             'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
             'Sec-Fetch-Mode': 'cors',
             'Origin': 'https://tps.ylbz.tj.gov.cn',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15',
+            # 'User-Agent': Handled by RandomUserAgentMiddleware
             'Referer': 'https://tps.ylbz.tj.gov.cn/drugGuide/tps-local/b/',
             'Sec-Fetch-Dest': 'empty',
             'Priority': 'u=3, i'
         },
-        'ITEM_PIPELINES': {
-            'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
-            'hybrid_crawler.pipelines.TianjinDrugPipeline': 400,         # 入库
-        }
+        # Pipeline 配置已移至全局 settings.py
     }
 
     def get_verification_code(self):
@@ -75,18 +72,6 @@ class TianjinDrugSpider(scrapy.Spider):
                 "verificationCode": self.get_verification_code(),
                 "content": content
             }
-            
-            # 上报开始采集状态
-            # yield {
-            #     '_status_': True,
-            #     'crawl_id': self.crawl_id,
-            #     'stage': 'start_requests',
-            #     'page_no': 1,
-            #     'params': payload,
-            #     'api_url': self.drug_list_url,
-            #     'reference_id': content,
-            #     'success': True
-            # }
             
             yield JsonRequest(
                 url=self.drug_list_url,
@@ -112,18 +97,15 @@ class TianjinDrugSpider(scrapy.Spider):
                 error_msg = res_json.get('message', 'Unknown Error')
                 self.spider_log.error(f"❌ 关键词 [{keyword}] 列表API错误: {error_msg}")
                 
-                yield {
-                    '_status_': True,
-                    'crawl_id': page_crawl_id,
-                    'stage': 'list_page',
-                    'page_no': 1,
-                    'params': current_payload,
-                    'api_url': self.drug_list_url,
-                    'reference_id': keyword,
-                    'success': False,
-                    'error_message': error_msg,
-                    'parent_crawl_id': parent_crawl_id
-                }
+                yield self.report_error(
+                    stage='list_page',
+                    error_msg=error_msg,
+                    crawl_id=page_crawl_id,
+                    params=current_payload,
+                    api_url=self.drug_list_url,
+                    parent_crawl_id=parent_crawl_id,
+                    reference_id=keyword
+                )
                 return
 
             data = res_json.get("data", {})
@@ -131,35 +113,29 @@ class TianjinDrugSpider(scrapy.Spider):
             
             if not drug_list:
                 self.spider_log.info(f"📄 关键词 [{keyword}] 未找到药品记录")
-                yield {
-                    '_status_': True,
-                    'crawl_id': page_crawl_id,
-                    'stage': 'list_page',
-                    'page_no': 1,
-                    'items_found': 0,
-                    'params': current_payload,
-                    'api_url': self.drug_list_url,
-                    'reference_id': keyword,
-                    'success': True,
-                    'parent_crawl_id': parent_crawl_id
-                }
+                yield self.report_list_page(
+                    crawl_id=page_crawl_id,
+                    page_no=1,
+                    items_found=0,
+                    params=current_payload,
+                    api_url=self.drug_list_url,
+                    parent_crawl_id=parent_crawl_id,
+                    reference_id=keyword
+                )
                 return
 
             self.spider_log.info(f"📄 关键词 [{keyword}] 发现 {len(drug_list)} 条药品记录")
             
             # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': 1,
-                'items_found': len(drug_list),
-                'params': current_payload,
-                'api_url': self.drug_list_url,
-                'reference_id': keyword,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=1,
+                items_found=len(drug_list),
+                params=current_payload,
+                api_url=self.drug_list_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=keyword
+            )
 
             item_count = 0
             for drug in drug_list:
@@ -203,34 +179,28 @@ class TianjinDrugSpider(scrapy.Spider):
                 item_count += 1
             
             # 更新页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': 1,
-                'items_found': len(drug_list),
-                'items_stored': item_count,
-                'params': current_payload,
-                'api_url': self.drug_list_url,
-                'reference_id': keyword,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=1,
+                items_found=len(drug_list),
+                items_stored=item_count,
+                params=current_payload,
+                api_url=self.drug_list_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=keyword
+            )
 
         except Exception as e:
             self.spider_log.error(f"❌ 解析药品列表失败: {e}", exc_info=True)
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': 1,
-                'params': current_payload,
-                'api_url': self.drug_list_url,
-                'reference_id': keyword,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_payload,
+                api_url=self.drug_list_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=keyword
+            )
 
     def parse_hospital_list(self, response):
         """解析医院列表并生成最终Item"""
@@ -248,17 +218,15 @@ class TianjinDrugSpider(scrapy.Spider):
                 
                 # 即使医院接口报错，也可以选择保存药品基础信息
                 # 但这里我们记录错误状态
-                yield {
-                    '_status_': True,
-                    'crawl_id': detail_crawl_id,
-                    'stage': 'detail_page',
-                    'params': current_payload,
-                    'api_url': self.hospital_list_url,
-                    'reference_id': base_info.get('med_id'),
-                    'success': False,
-                    'error_message': msg,
-                    'parent_crawl_id': parent_crawl_id
-                }
+                yield self.report_error(
+                    stage='detail_page',
+                    error_msg=msg,
+                    crawl_id=detail_crawl_id,
+                    params=current_payload,
+                    api_url=self.hospital_list_url,
+                    parent_crawl_id=parent_crawl_id,
+                    reference_id=base_info.get('med_id')
+                )
                 return
 
             data = res_json.get("data", {})
@@ -267,18 +235,15 @@ class TianjinDrugSpider(scrapy.Spider):
             self.spider_log.info(f"🏥 药品 [{base_info['gen_name']}] 发现 {len(hosp_list)} 家医院")
             
             # 上报详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': 1,
-                'items_found': len(hosp_list),
-                'params': current_payload,
-                'api_url': self.hospital_list_url,
-                'reference_id': base_info.get('med_id'),
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=1,
+                items_found=len(hosp_list),
+                params=current_payload,
+                api_url=self.hospital_list_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=base_info.get('med_id')
+            )
 
             item_count = 0
             if hosp_list:
@@ -309,30 +274,25 @@ class TianjinDrugSpider(scrapy.Spider):
                 item_count += 1
             
             # 更新详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': 1,
-                'items_found': len(hosp_list),
-                'items_stored': item_count,
-                'params': current_payload,
-                'api_url': self.hospital_list_url,
-                'reference_id': base_info.get('med_id'),
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=1,
+                items_found=len(hosp_list),
+                items_stored=item_count,
+                params=current_payload,
+                api_url=self.hospital_list_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=base_info.get('med_id')
+            )
 
         except Exception as e:
             self.spider_log.error(f"❌ 解析医院列表失败: {e}", exc_info=True)
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'params': current_payload,
-                'api_url': self.hospital_list_url,
-                'reference_id': base_info.get('med_id'),
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='detail_page',
+                error_msg=e,
+                crawl_id=detail_crawl_id,
+                params=current_payload,
+                api_url=self.hospital_list_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=base_info.get('med_id')
+            )

@@ -55,6 +55,9 @@ class HebeiDrugItem(scrapy.Item):
         
         return md5_hash
 
+    def get_model_class(self):
+        return HebeiDrug
+
 
 class HebeiDrug(BaseModel):
     """

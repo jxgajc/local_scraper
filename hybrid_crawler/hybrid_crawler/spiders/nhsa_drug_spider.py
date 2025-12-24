@@ -5,8 +5,9 @@ import json
 import scrapy
 import time
 import uuid
+from .mixins import SpiderStatusMixin
 
-class NhsaDrugSpider(BaseRequestSpider):
+class NhsaDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     """
     国家医保药品数据爬虫
     目标: 采集国家医保药品数据API，获取药品信息
@@ -39,15 +40,11 @@ class NhsaDrugSpider(BaseRequestSpider):
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
+            # 'User-Agent': ... # 保留原有的UA，或者删除让RandomUA处理？国家医保局可能校验严格，暂时保留
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15',
             'X-Requested-With': 'XMLHttpRequest',
         },
-        # 使用专门的国家医保药品数据管道
-        'ITEM_PIPELINES': {
-            'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
-            'hybrid_crawler.pipelines.NhsaDrugPipeline': 400,           # 入库
-        }
+        # Pipeline 配置已移至全局 settings.py
     }
 
     def start_requests(self):
@@ -68,17 +65,6 @@ class NhsaDrugSpider(BaseRequestSpider):
         }
         
         self.logger.info(f"📋 开始采集国家医保药品数据，Batch: {form_data['batchNumber']}")
-        
-        # 上报开始采集状态
-        yield {
-            '_status_': True,
-            'crawl_id': self.crawl_id,
-            'stage': 'start_requests',
-            'page_no': 1,
-            'params': form_data,
-            'api_url': self.list_api_url,
-            'success': True
-        }
         
         # 发起第一页请求
         yield scrapy.FormRequest(
@@ -107,19 +93,15 @@ class NhsaDrugSpider(BaseRequestSpider):
             
             self.logger.info(f"📄 列表页面 [{current_page}/{total_pages}] - 发现 {len(rows)} 条记录 (总计: {total_records})")
 
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(rows),
-                'params': current_form_data,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(rows),
+                params=current_form_data,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
             item_count = 0
             # 1. 处理当前页的每一条药品数据
@@ -128,19 +110,16 @@ class NhsaDrugSpider(BaseRequestSpider):
                 item_count += 1
 
             # 更新页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(rows),
-                'items_stored': item_count,
-                'params': current_form_data,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(rows),
+                items_stored=item_count,
+                params=current_form_data,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
             # 2. 生成剩余页码请求 (从第2页开始)
             # 只有在处理第1页时才生成所有后续页码请求
@@ -168,17 +147,14 @@ class NhsaDrugSpider(BaseRequestSpider):
         except Exception as e:
             self.logger.error(f"❌ 列表页解析失败 (Page 1): {e}", exc_info=True)
             
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': 1,
-                'params': current_form_data,
-                'api_url': self.list_api_url,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_form_data,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
     def parse_list_page(self, response):
         """处理后续页面的响应"""
@@ -195,54 +171,43 @@ class NhsaDrugSpider(BaseRequestSpider):
             
             self.logger.info(f"📄 列表页面 [{page_num}/{total_pages}] - 发现 {len(rows)} 条记录")
             
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': page_num,
-                'total_pages': total_pages,
-                'items_found': len(rows),
-                'params': current_form_data,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=page_num,
+                total_pages=total_pages,
+                items_found=len(rows),
+                params=current_form_data,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
             
             item_count = 0
             for drug_item in rows:
                 yield self._create_item(drug_item, page_num)
                 item_count += 1
             
-            # 更新页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': page_num,
-                'total_pages': total_pages,
-                'items_found': len(rows),
-                'items_stored': item_count,
-                'params': current_form_data,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=page_num,
+                total_pages=total_pages,
+                items_found=len(rows),
+                items_stored=item_count,
+                params=current_form_data,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
         except Exception as e:
             self.logger.error(f"❌ 页面处理失败 (Page {page_num}): {e}", exc_info=True)
             
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': page_num,
-                'params': current_form_data,
-                'api_url': self.list_api_url,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_form_data,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
     def _create_item(self, drug_item, page_num):
         """

@@ -70,6 +70,9 @@ class NingxiaDrugItem(scrapy.Item):
         
         return md5_hash
 
+    def get_model_class(self):
+        return NingxiaDrug
+
 
 class NingxiaDrug(BaseModel):
     """

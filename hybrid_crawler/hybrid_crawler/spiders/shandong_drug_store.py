@@ -9,13 +9,14 @@ from scrapy.http import JsonRequest
 import pandas as pd
 from ..utils.logger_utils import get_spider_logger
 import os
+from .mixins import SpiderStatusMixin
 
 # 获取脚本所在目录的绝对路径
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 构建Excel文件的绝对路径
 excel_path = os.path.join(script_dir, "../../关键字采集(2).xlsx")
 
-class ShandongDrugSpider(scrapy.Spider):
+class ShandongDrugSpider(SpiderStatusMixin, scrapy.Spider):
     name = "drug_hosipital_shandong"
     
     # 接口 URL
@@ -51,18 +52,14 @@ class ShandongDrugSpider(scrapy.Spider):
             'Content-Type': 'application/json;charset=utf-8',
             'Origin': 'https://ypjc.ybj.shandong.gov.cn',
             'Referer': 'https://ypjc.ybj.shandong.gov.cn/trade/drug/query-of-hanging-directory/index',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15',
+            # 'User-Agent': Handled by RandomUserAgentMiddleware
             'queryToken': '05ea8b36dcbc4cbf925d1eb65324dd96', 
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
             'Priority': 'u=3, i'
         },
-        'ITEM_PIPELINES': {
-            'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
-            'hybrid_crawler.pipelines.ShandongDrugPipeline': 400,        # 入库
-        }
+        # Pipeline 配置已移至全局 settings.py
     }
 
     def start_requests(self):
@@ -79,18 +76,6 @@ class ShandongDrugSpider(scrapy.Spider):
         for prod_name in self.product_names:
             timestamp = int(time.time() * 1000)
             url = f"{self.captcha_url}?timestamp={timestamp}"
-            
-            # 上报开始采集状态 (针对每个关键词)
-            # yield {
-            #     '_status_': True,
-            #     'crawl_id': self.crawl_id,
-            #     'stage': 'start_requests',
-            #     'page_no': 1,
-            #     'params': {'keyword': prod_name},
-            #     'api_url': self.list_api_url,
-            #     'reference_id': prod_name,
-            #     'success': True
-            # }
             
             yield JsonRequest(
                 url=url, 
@@ -120,11 +105,7 @@ class ShandongDrugSpider(scrapy.Spider):
             base64_str = data.get("base64Str", "")
             random_str = data.get("randomStr", "")
             resp_text = data.get("text", "") 
-
-            if not base64_str:
-                self.spider_log.error(f"❌ [{current_keyword}] 未找到验证码图片数据")
-                return
-
+            
             # ddddocr 识别
             img_bytes = base64.b64decode(base64_str.split(',')[-1])
             code_result = self.ocr.classification(img_bytes)
@@ -212,18 +193,15 @@ class ShandongDrugSpider(scrapy.Spider):
                 else:
                     self.spider_log.warning(f"❌ [{current_keyword}] 列表请求异常: {res_json.get('msg', 'Unknown')}")
                     
-                    yield {
-                        '_status_': True,
-                        'crawl_id': page_crawl_id,
-                        'stage': 'list_page',
-                        'page_no': current_payload.get('current'),
-                        'params': current_payload,
-                        'api_url': self.list_api_url,
-                        'reference_id': current_keyword,
-                        'success': False,
-                        'error_message': res_json.get('msg', 'Unknown Error'),
-                        'parent_crawl_id': parent_crawl_id
-                    }
+                    yield self.report_error(
+                        stage='list_page',
+                        error_msg=res_json.get('msg', 'Unknown Error'),
+                        crawl_id=page_crawl_id,
+                        params=current_payload,
+                        api_url=self.list_api_url,
+                        parent_crawl_id=parent_crawl_id,
+                        reference_id=current_keyword
+                    )
                     return
 
             # --- 正常数据处理逻辑 ---
@@ -235,20 +213,16 @@ class ShandongDrugSpider(scrapy.Spider):
 
             self.spider_log.info(f"📄 关键词 [{current_keyword}] 列表页面 [{current_page}/{total_pages}] - 发现 {len(records)} 条记录 (总计: {total_records})")
 
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'reference_id': current_keyword,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=current_keyword
+            )
 
             item_count = 0
             for record in records:
@@ -305,20 +279,17 @@ class ShandongDrugSpider(scrapy.Spider):
                     item_count += 1
 
             # 更新页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count,
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'reference_id': current_keyword,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                items_stored=item_count,
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=current_keyword
+            )
 
             # 翻页逻辑
             if current_page < total_pages:
@@ -343,18 +314,15 @@ class ShandongDrugSpider(scrapy.Spider):
 
         except Exception as e:
             self.spider_log.error(f"❌ [{current_keyword}] 解析药品列表页异常: {e}", exc_info=True)
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_payload.get('current'),
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'reference_id': current_keyword,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=current_keyword
+            )
 
     def parse_hospital(self, response):
         """解析医院详情"""
@@ -372,18 +340,15 @@ class ShandongDrugSpider(scrapy.Spider):
                 msg = res_json.get('msg', 'Unknown Error')
                 self.spider_log.warning(f"⚠️ 医院接口请求失败: {msg}")
                 
-                yield {
-                    '_status_': True,
-                    'crawl_id': detail_crawl_id,
-                    'stage': 'detail_page',
-                    'page_no': current_payload['current'],
-                    'params': current_payload,
-                    'api_url': self.hospital_api_url,
-                    'reference_id': prod_code,
-                    'success': False,
-                    'error_message': msg,
-                    'parent_crawl_id': parent_crawl_id
-                }
+                yield self.report_error(
+                    stage='detail_page',
+                    error_msg=msg,
+                    crawl_id=detail_crawl_id,
+                    params=current_payload,
+                    api_url=self.hospital_api_url,
+                    parent_crawl_id=parent_crawl_id,
+                    reference_id=prod_code
+                )
                 return
 
             data = res_json.get("data", {})
@@ -393,20 +358,16 @@ class ShandongDrugSpider(scrapy.Spider):
             
             self.spider_log.info(f"🏥 药品 [{base_info['prodName']}] 详情页 [{current_page}/{total_pages}] - 发现 {len(records)} 家医院")
             
-            # 上报详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': prod_code,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=prod_code
+            )
 
             item_count = 0
             if not records:
@@ -437,20 +398,17 @@ class ShandongDrugSpider(scrapy.Spider):
                     item_count += 1
 
             # 更新详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count,
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': prod_code,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                items_stored=item_count,
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=prod_code
+            )
 
             if current_page < total_pages:
                 next_page = current_page + 1
@@ -472,15 +430,12 @@ class ShandongDrugSpider(scrapy.Spider):
                 )
         except Exception as e:
             self.spider_log.error(f"❌ 解析医院详情页异常: {e}", exc_info=True)
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_payload.get('current'),
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': prod_code,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='detail_page',
+                error_msg=e,
+                crawl_id=detail_crawl_id,
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=prod_code
+            )

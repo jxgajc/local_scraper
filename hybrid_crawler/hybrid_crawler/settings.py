@@ -47,21 +47,34 @@ RETRY_TIMES = 3      # 重试 3 次
 # =============================================================================
 DOWNLOADER_MIDDLEWARES = {
     'hybrid_crawler.middlewares.StrategyRoutingMiddleware': 100, # 路由策略
+    'hybrid_crawler.middlewares.RandomUserAgentMiddleware': 400, # 随机UA
     'hybrid_crawler.middlewares.SmartRetryMiddleware': 550,      # 智能重试
     'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,  # 禁用默认重试
+    'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None, # 禁用默认UA
 }
 
 ITEM_PIPELINES = {
     'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
     'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 采集状态记录
-    'hybrid_crawler.pipelines.AsyncBatchWritePipeline': 400,     # 入库
+    'hybrid_crawler.pipelines.UniversalBatchWritePipeline': 400, # 通用批量入库
 }
 
 # =============================================================================
 # 异步写入缓冲配置
 # =============================================================================
-BUFFER_THRESHOLD = 500  # 积攒 50 条写入一次
+BUFFER_THRESHOLD = 500  # 积攒 500 条写入一次
 BUFFER_TIMEOUT_SEC = 1.5 # 或最长等待 1.5 秒写入一次
+
+# =============================================================================
+# User-Agent 池配置
+# =============================================================================
+USER_AGENT_LIST = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+]
 
 # =============================================================================
 # Playwright 专用配置
@@ -110,4 +123,3 @@ LOG_LEVELS = {
     'twisted': 'WARNING',
     'hybrid_crawler': 'INFO',
 }
-

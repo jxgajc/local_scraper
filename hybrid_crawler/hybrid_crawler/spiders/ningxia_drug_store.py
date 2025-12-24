@@ -4,8 +4,9 @@ from ..utils.logger_utils import get_spider_logger
 import json
 import scrapy
 import uuid
+from .mixins import SpiderStatusMixin
 
-class NingxiaDrugSpider(BaseRequestSpider):
+class NingxiaDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     """
     宁夏医保局药品及采购医院爬虫
     流程: 
@@ -31,16 +32,12 @@ class NingxiaDrugSpider(BaseRequestSpider):
         'DOWNLOAD_DELAY': 1,
         'DEFAULT_REQUEST_HEADERS': {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15',
+            # 'User-Agent': Handled by RandomUserAgentMiddleware
             'Origin': 'https://nxyp.ylbz.nx.gov.cn',
             'Referer': 'https://nxyp.ylbz.nx.gov.cn/cms/showListYPXQ.html',
             'X-Requested-With': 'XMLHttpRequest'
         },
-        'ITEM_PIPELINES': {
-            'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
-            'hybrid_crawler.pipelines.NingxiaDrugPipeline': 400,         # 入库
-        }
+        # Pipeline 配置已移至全局 settings.py
     }
 
     def start_requests(self):
@@ -54,17 +51,6 @@ class NingxiaDrugSpider(BaseRequestSpider):
         }
         
         self.spider_log.info(f"📋 开始采集药品列表，初始payload: {json.dumps(payload)}")
-        
-        # 上报开始采集状态
-        # yield {
-        #     '_status_': True,
-        #     'crawl_id': self.crawl_id,
-        #     'stage': 'start_requests',
-        #     'page_no': 1,
-        #     'params': payload,
-        #     'api_url': self.list_api_url,
-        #     'success': True
-        # }
         
         yield scrapy.FormRequest(
             url=self.list_api_url,
@@ -94,19 +80,15 @@ class NingxiaDrugSpider(BaseRequestSpider):
 
             self.spider_log.info(f"📄 药品列表页面 [{current_page}/{total_pages}] - 发现 {len(records)} 条药品记录 (总计: {total_records})")
 
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
             item_count = 0
             # --- 核心逻辑：遍历药品，进入第二层详情 ---
@@ -120,19 +102,16 @@ class NingxiaDrugSpider(BaseRequestSpider):
                     self.spider_log.warning(f"⚠️ 药品缺少 procurecatalogId: {drug_item.get('productName')}")
 
             # 更新页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count, # 触发了多少个详情请求
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                items_stored=item_count, # 触发了多少个详情请求
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
             # --- 列表页翻页逻辑 ---
             if current_page < total_pages:
@@ -153,17 +132,14 @@ class NingxiaDrugSpider(BaseRequestSpider):
         except Exception as e:
             self.spider_log.error(f"❌ 药品列表解析失败: {e}", exc_info=True)
             
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_payload.get('page'),
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
     def _request_hospital_detail(self, drug_item, parent_crawl_id):
         """Step 3: 构造医院详情请求 (POST)"""
@@ -210,20 +186,16 @@ class NingxiaDrugSpider(BaseRequestSpider):
             
             self.spider_log.info(f"🏥 药品 [{drug_info.get('productName')}] 详情页 [{current_detail_page}/{total_detail_pages}] - 发现 {len(hospitals)} 家医院")
 
-            # 上报详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_detail_page,
-                'total_pages': total_detail_pages,
-                'items_found': len(hospitals),
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': response.meta['procure_id'],
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=current_detail_page,
+                total_pages=total_detail_pages,
+                items_found=len(hospitals),
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=response.meta['procure_id']
+            )
 
             item_count = 0
             # 遍历当前页的医院，生成最终数据
@@ -232,20 +204,17 @@ class NingxiaDrugSpider(BaseRequestSpider):
                 item_count += 1
 
             # 更新详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_detail_page,
-                'total_pages': total_detail_pages,
-                'items_found': len(hospitals),
-                'items_stored': item_count,
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': response.meta['procure_id'],
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=current_detail_page,
+                total_pages=total_detail_pages,
+                items_found=len(hospitals),
+                items_stored=item_count,
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=response.meta['procure_id']
+            )
 
             # --- 详情页翻页逻辑 ---
             if current_detail_page < total_detail_pages:
@@ -271,18 +240,15 @@ class NingxiaDrugSpider(BaseRequestSpider):
         except Exception as e:
             self.spider_log.error(f"❌ 医院详情解析失败: {e} | DrugID: {response.meta.get('procure_id')}", exc_info=True)
             
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_payload.get('page'),
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': response.meta.get('procure_id'),
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='detail_page',
+                error_msg=e,
+                crawl_id=detail_crawl_id,
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=response.meta.get('procure_id')
+            )
 
     def _create_item(self, drug_info, hosp_item, response=None):
         """合并药品信息和医院信息"""

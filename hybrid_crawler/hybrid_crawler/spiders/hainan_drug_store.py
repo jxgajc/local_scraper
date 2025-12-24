@@ -6,13 +6,14 @@ from ..models.hainan_drug import HainanDrugItem
 from ..utils.logger_utils import get_spider_logger
 import pandas as pd
 import os
+from .mixins import SpiderStatusMixin
 
 # 获取脚本所在目录的绝对路径
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 构建Excel文件的绝对路径
 excel_path = os.path.join(script_dir, "../../关键字采集(2).xlsx")
 
-class HainanDrugSpider(scrapy.Spider):
+class HainanDrugSpider(SpiderStatusMixin, scrapy.Spider):
     """
     海南省医保服务平台 - 药品门店查询爬虫
     Target: https://ybj.hainan.gov.cn
@@ -48,16 +49,12 @@ class HainanDrugSpider(scrapy.Spider):
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+            # 'User-Agent': Handled by RandomUserAgentMiddleware
             'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"'
         },
-        'ITEM_PIPELINES': {
-            'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
-            'hybrid_crawler.pipelines.HainanDrugPipeline': 400,          # 入库
-        }
+        # Pipeline 配置已移至全局 settings.py
     }
 
     def start_requests(self):
@@ -74,18 +71,6 @@ class HainanDrugSpider(scrapy.Spider):
             
             self.spider_log.info(f"🔍 正在采集关键词: {keyword}")
 
-            # 上报开始采集状态
-            # yield {
-            #     '_status_': True,
-            #     'crawl_id': self.crawl_id,
-            #     'stage': 'start_requests',
-            #     'page_no': 1,
-            #     'params': params,
-            #     'api_url': self.list_api_base,
-            #     'reference_id': keyword,
-            #     'success': True
-            # }
-            
             yield scrapy.Request(
                 url=url,
                 callback=self.parse_list,
@@ -110,19 +95,14 @@ class HainanDrugSpider(scrapy.Spider):
                 error_msg = res_json.get('msg', 'Unknown Error')
                 self.spider_log.error(f"❌ 关键词 [{keyword}] 列表API错误 (Page {current_page}): {error_msg}")
                 
-                # 上报失败状态
-                yield {
-                    '_status_': True,
-                    'crawl_id': page_crawl_id,
-                    'stage': 'list_page',
-                    'page_no': current_page,
-                    'params': {'prodName': keyword, 'current': current_page},
-                    'api_url': self.list_api_base,
-                    'reference_id': keyword,
-                    'success': False,
-                    'error_message': error_msg,
-                    'parent_crawl_id': parent_crawl_id
-                }
+                yield self.report_error(
+                    stage='list_page',
+                    error_msg=error_msg,
+                    crawl_id=page_crawl_id,
+                    params={'prodName': keyword, 'current': current_page},
+                    api_url=self.list_api_base,
+                    parent_crawl_id=parent_crawl_id
+                )
                 return
 
             data = res_json.get("data", {})
@@ -132,21 +112,16 @@ class HainanDrugSpider(scrapy.Spider):
 
             self.spider_log.info(f"📄 关键词 [{keyword}] 列表页面 [{current_page}/{total_pages}] - 发现 {len(records)} 条药品记录")
             
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'page_size': page_size,
-                'items_found': len(records),
-                'params': {'prodName': keyword, 'current': current_page},
-                'api_url': self.list_api_base,
-                'reference_id': keyword,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                params={'prodName': keyword, 'current': current_page},
+                api_url=self.list_api_base,
+                parent_crawl_id=parent_crawl_id,
+                page_size=page_size
+            )
 
             item_count = 0
             for record in records:
@@ -196,20 +171,17 @@ class HainanDrugSpider(scrapy.Spider):
                     item_count += 1
 
             # 更新页面采集状态，记录成功存储的条数（包含触发的子请求）
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count,
-                'params': {'prodName': keyword, 'current': current_page},
-                'api_url': self.list_api_base,
-                'reference_id': keyword,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current_page,
+                total_pages=total_pages,
+                items_found=len(records),
+                params={'prodName': keyword, 'current': current_page},
+                api_url=self.list_api_base,
+                parent_crawl_id=parent_crawl_id,
+                page_size=page_size,
+                items_stored=item_count
+            )
 
             # 3. 列表页翻页
             if current_page < total_pages:
@@ -237,19 +209,14 @@ class HainanDrugSpider(scrapy.Spider):
         except Exception as e:
             self.spider_log.error(f"❌ 解析关键词 [{keyword}] 列表失败 (Page {current_page}): {e}", exc_info=True)
             
-            # 上报异常状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current_page,
-                'params': {'prodName': keyword, 'current': current_page},
-                'api_url': self.list_api_base,
-                'reference_id': keyword,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params={'prodName': keyword, 'current': current_page},
+                api_url=self.list_api_base,
+                parent_crawl_id=parent_crawl_id
+            )
 
     def parse_detail(self, response):
         """解析门店/医院详情并处理翻页"""
@@ -266,19 +233,15 @@ class HainanDrugSpider(scrapy.Spider):
                 error_msg = res_json.get('msg', 'Unknown Error')
                 self.spider_log.warning(f"⚠️ 药品 [{prod_name}] 详情API错误 (Page {current_page}): {error_msg}")
                 
-                # 上报失败状态
-                yield {
-                    '_status_': True,
-                    'crawl_id': detail_crawl_id,
-                    'stage': 'detail_page',
-                    'page_no': current_page,
-                    'params': {'drugCode': drug_code, 'current': current_page},
-                    'api_url': self.detail_api_base,
-                    'reference_id': drug_code,
-                    'success': False,
-                    'error_message': error_msg,
-                    'parent_crawl_id': parent_crawl_id
-                }
+                yield self.report_error(
+                    stage='detail_page',
+                    error_msg=error_msg,
+                    crawl_id=detail_crawl_id,
+                    params={'drugCode': drug_code, 'current': current_page},
+                    api_url=self.detail_api_base,
+                    parent_crawl_id=parent_crawl_id,
+                    reference_id=drug_code
+                )
                 return
 
             data = res_json.get("data", {})
@@ -288,21 +251,17 @@ class HainanDrugSpider(scrapy.Spider):
 
             self.spider_log.info(f"🏥 药品 [{prod_name}] 详情页面 [{current_page}/{total_pages}] - 发现 {len(records)} 条门店记录")
             
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'page_size': page_size,
-                'items_found': len(records),
-                'params': {'drugCode': drug_code, 'current': current_page},
-                'api_url': self.detail_api_base,
-                'reference_id': drug_code,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=current_page,
+                items_found=len(records),
+                params={'drugCode': drug_code, 'current': current_page},
+                api_url=self.detail_api_base,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=drug_code,
+                total_pages=total_pages,
+                page_size=page_size
+            )
 
             item_count = 0
             if records:
@@ -365,34 +324,27 @@ class HainanDrugSpider(scrapy.Spider):
                 item_count += 1
 
             # 更新页面采集状态，记录成功存储的条数
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_page,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count,
-                'params': {'drugCode': drug_code, 'current': current_page},
-                'api_url': self.detail_api_base,
-                'reference_id': drug_code,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=current_page,
+                items_found=len(records),
+                params={'drugCode': drug_code, 'current': current_page},
+                api_url=self.detail_api_base,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=drug_code,
+                total_pages=total_pages,
+                items_stored=item_count
+            )
 
         except Exception as e:
             self.spider_log.error(f"❌ 解析药品 [{prod_name}] 详情失败 (Page {current_page}): {e}", exc_info=True)
             
-            # 上报异常状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': current_page,
-                'params': {'drugCode': drug_code, 'current': current_page},
-                'api_url': self.detail_api_base,
-                'reference_id': drug_code,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='detail_page',
+                error_msg=e,
+                crawl_id=detail_crawl_id,
+                params={'drugCode': drug_code, 'current': current_page},
+                api_url=self.detail_api_base,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=drug_code
+            )

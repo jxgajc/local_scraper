@@ -55,6 +55,9 @@ class LiaoningDrugItem(scrapy.Item):
         
         return md5_hash
 
+    def get_model_class(self):
+        return LiaoningDrug
+
 
 class LiaoningDrug(BaseModel):
     __tablename__ = 'drug_hospital_liaoning_test'

@@ -59,3 +59,32 @@ class SmartRetryMiddleware(RetryMiddleware):
             return self._retry(request, exception, spider)
 
         return super().process_exception(request, exception, spider)
+
+class RandomUserAgentMiddleware:
+    """
+    【随机 User-Agent 中间件】
+    每次请求自动随机切换 User-Agent，降低特征指纹。
+    """
+    def __init__(self, settings):
+        self.ua_list = settings.get('USER_AGENT_LIST', [])
+        # Fallback list if settings is empty
+        if not self.ua_list:
+            self.ua_list = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+            ]
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings)
+
+    def process_request(self, request, spider):
+        # 只有在 headers 中没有设置 User-Agent 时才添加，避免覆盖 Spider 特定的设置
+        if not request.headers.get('User-Agent'):
+            ua = random.choice(self.ua_list)
+            if ua:
+                request.headers.setdefault('User-Agent', ua)
+                # logger.debug(f"User-Agent set to: {ua}")

@@ -1,4 +1,3 @@
-from ast import Param
 from .base_spiders import BaseRequestSpider
 from ..models.hebei_drug import HebeiDrugItem
 from ..utils.logger_utils import get_spider_logger
@@ -7,9 +6,10 @@ import json
 import scrapy
 import time
 import uuid
+from .mixins import SpiderStatusMixin
 
 # http://ylbzj.hebei.gov.cn/category/162
-class HebeiDrugSpider(BaseRequestSpider):
+class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     """
     河北医保局药品及采购医院爬虫
     目标: 先获取药品列表，再根据 prodCode 获取采购该药品的医院信息
@@ -37,14 +37,10 @@ class HebeiDrugSpider(BaseRequestSpider):
             'Accept': '*/*',
             'Connection': 'keep-alive',
             'Content-Type': 'application/json',
-            'User-Agent': 'PostmanRuntime-ApipostRuntime/1.1.0',
+            # 'User-Agent': Handled by RandomUserAgentMiddleware
             'prodType': '2'
         },
-        'ITEM_PIPELINES': {
-            'hybrid_crawler.pipelines.DataCleaningPipeline': 300,        # 清洗
-            'hybrid_crawler.pipelines.CrawlStatusPipeline': 350,         # 状态监控 (新增)
-            'hybrid_crawler.pipelines.HebeiDrugPipeline': 400,           # 入库
-        }
+        # Pipeline 配置已移至全局 settings.py
     }
 
     def start_requests(self):
@@ -59,17 +55,6 @@ class HebeiDrugSpider(BaseRequestSpider):
         full_url = f"{self.list_api_url}?{query_string}"
         
         self.spider_log.info(f"📋 开始采集药品列表，初始payload: {json.dumps(payload)}")
-        
-        # 上报开始采集状态
-        # yield {
-        #     '_status_': True,
-        #     'crawl_id': self.crawl_id,
-        #     'stage': 'start_requests',
-        #     'page_no': 1,
-        #     'params': payload,
-        #     'api_url': self.list_api_url,
-        #     'success': True
-        # }
         
         # 发起第一页请求（不需要cookie）
         yield scrapy.Request(
@@ -101,20 +86,16 @@ class HebeiDrugSpider(BaseRequestSpider):
 
             self.spider_log.info(f"📄 列表页面 [{current}/{total_pages}] - 发现 {len(records)} 条药品记录")
             
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current,
-                'total_pages': total_pages,
-                'page_size': page_size,
-                'items_found': len(records),
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                page_size=page_size
+            )
 
             item_count = 0
             # 1. 处理当前页的每一条药品数据 -> 发起详情请求
@@ -125,19 +106,17 @@ class HebeiDrugSpider(BaseRequestSpider):
                     item_count += 1
 
             # 更新页面采集状态，记录触发的详情页请求数量
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': current,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count, 
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=current,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                page_size=page_size,
+                items_stored=item_count
+            )
 
             # 2. 生成剩余页码请求 (从第2页开始)
             if current < total_pages:
@@ -164,18 +143,14 @@ class HebeiDrugSpider(BaseRequestSpider):
         except Exception as e:
             self.spider_log.error(f"❌ 列表页面解析失败 (Page 1): {e}", exc_info=True)
             
-            # 上报异常状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': 1,
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
     def parse_list_page(self, response):
         """处理后续药品列表页"""
@@ -196,20 +171,16 @@ class HebeiDrugSpider(BaseRequestSpider):
             
             self.spider_log.info(f"📄 列表页面 [{page_num}/{total_pages}] - 发现 {len(records)} 条药品记录")
             
-            # 上报页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': page_num,
-                'total_pages': total_pages,
-                'page_size': page_size,
-                'items_found': len(records),
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=page_num,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                page_size=page_size
+            )
             
             item_count = 0
             for drug_item in records:
@@ -217,35 +188,29 @@ class HebeiDrugSpider(BaseRequestSpider):
                     yield request
                     item_count += 1
             
-            # 更新页面采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': page_num,
-                'total_pages': total_pages,
-                'items_found': len(records),
-                'items_stored': item_count,
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_list_page(
+                crawl_id=page_crawl_id,
+                page_no=page_num,
+                total_pages=total_pages,
+                items_found=len(records),
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id,
+                page_size=page_size,
+                items_stored=item_count
+            )
                 
         except Exception as e:
             self.spider_log.error(f"❌ 分页解析失败 Page {page_num}: {e}", exc_info=True)
             
-            yield {
-                '_status_': True,
-                'crawl_id': page_crawl_id,
-                'stage': 'list_page',
-                'page_no': page_num,
-                'params': current_payload,
-                'api_url': self.list_api_url,
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='list_page',
+                error_msg=e,
+                crawl_id=page_crawl_id,
+                params=current_payload,
+                api_url=self.list_api_url,
+                parent_crawl_id=parent_crawl_id
+            )
 
     def _request_hospital_detail(self, drug_item, page_num, parent_crawl_id):
         """构造获取医院详情的请求，将 drug_item 传递下去"""
@@ -304,51 +269,45 @@ class HebeiDrugSpider(BaseRequestSpider):
             
             self.spider_log.info(f"🏥 药品 [{drug_info.get('prodName')}] 详情页 - 发现 {len(hospital_list)} 家医院记录")
             
-            # 上报详情页采集状态
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'page_no': page_num, # 详情页没有分页，沿用列表页码
-                'items_found': len(hospital_list),
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': drug_info.get('prodCode'),
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=page_num, # 详情页没有分页，沿用列表页码
+                items_found=len(hospital_list),
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=drug_info.get('prodCode'),
+                success=True
+            )
 
             # 3. 创建合并后的数据 Item
             item = self._create_item(drug_info, hospital_list, page_num)
             yield item
             
             # 更新状态，确认入库 1 条 (聚合了所有医院信息)
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'items_stored': 1,
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': drug_info.get('prodCode'),
-                'success': True,
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_detail_page(
+                crawl_id=detail_crawl_id,
+                page_no=page_num,
+                items_found=len(hospital_list),
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=drug_info.get('prodCode'),
+                items_stored=1
+            )
 
         except Exception as e:
             self.spider_log.error(f"❌ 详情页解析失败: {e} | URL: {response.url}", exc_info=True)
             
-            yield {
-                '_status_': True,
-                'crawl_id': detail_crawl_id,
-                'stage': 'detail_page',
-                'params': current_payload,
-                'api_url': self.hospital_api_url,
-                'reference_id': drug_info.get('prodCode'),
-                'success': False,
-                'error_message': str(e),
-                'parent_crawl_id': parent_crawl_id
-            }
+            yield self.report_error(
+                stage='detail_page',
+                error_msg=e,
+                crawl_id=detail_crawl_id,
+                params=current_payload,
+                api_url=self.hospital_api_url,
+                parent_crawl_id=parent_crawl_id,
+                reference_id=drug_info.get('prodCode')
+            )
 
     def _create_item(self, drug_info, hospital_list, page_num=1):
         """

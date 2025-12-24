@@ -96,6 +96,9 @@ class GuangdongDrugItem(scrapy.Item):
         self['md5_id'] = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+    def get_model_class(self):
+        return GuangdongDrug
+
 
 class GuangdongDrug(BaseModel):
     """
