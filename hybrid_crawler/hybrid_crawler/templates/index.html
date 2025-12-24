@@ -178,6 +178,44 @@
                                 <span class="text-white" v-text="monitorData.total_steps"></span>
                             </div>
                         </div>
+
+                        <!-- API Detail Section -->
+                        <div class="border-t border-white/10 pt-4 flex-1 overflow-y-auto" v-if="monitorData.detail && monitorData.detail.api_url">
+                            <div class="text-xs text-cyber-neon font-mono mb-3 uppercase flex items-center gap-2">
+                                <i class="fa-solid fa-network-wired"></i> Current Activity
+                            </div>
+                            
+                            <div class="space-y-3 font-mono text-[10px] text-gray-400">
+                                <div>
+                                    <div class="text-gray-500 mb-1 flex justify-between">
+                                        <span>API Endpoint</span>
+                                        <span class="text-gray-600" v-text="monitorData.detail.timestamp"></span>
+                                    </div>
+                                    <div class="text-cyber-neon/80 bg-black/40 p-2 rounded border border-white/5 break-all" v-text="monitorData.detail.api_url"></div>
+                                </div>
+
+                                <div>
+                                    <div class="text-gray-500 mb-1">Payload / Params</div>
+                                    <div class="text-gray-300 bg-black/40 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap break-all max-h-32 scrollbar-thin" v-text="typeof monitorData.detail.params === 'string' ? monitorData.detail.params : JSON.stringify(monitorData.detail.params, null, 2)"></div>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div class="bg-black/40 p-2 rounded border border-white/5 text-center">
+                                        <div class="text-gray-500 mb-1">Found</div>
+                                        <div class="text-white text-base font-bold" v-text="monitorData.detail.items_found || 0"></div>
+                                    </div>
+                                    <div class="bg-black/40 p-2 rounded border border-white/5 text-center">
+                                        <div class="text-gray-500 mb-1">Stored</div>
+                                        <div class="text-cyber-green text-base font-bold" v-text="monitorData.detail.items_stored || 0"></div>
+                                    </div>
+                                </div>
+                                
+                                <div v-if="monitorData.detail.error_message" class="bg-red-500/10 border border-red-500/30 p-2 rounded text-red-400 break-all">
+                                    <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                                    <span v-text="monitorData.detail.error_message"></span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Terminal Section -->

@@ -248,16 +248,34 @@ async def get_spider_monitor(name: str):
     current = 0
     total = 0
     status_text = "Initializing..."
+    last_status_detail = {}
     
     if SessionLocal and SpiderProgress:
         db = SessionLocal()
         try:
+            # 进度信息
             sp = db.query(SpiderProgress).filter_by(spider_name=name).first()
             if sp:
                 progress = sp.progress_percent
                 current = sp.completed_tasks
                 total = sp.total_tasks
                 status_text = sp.current_item or sp.status
+            
+            # 详细状态信息 (API, Params)
+            if CrawlStatus:
+                latest_status = db.query(CrawlStatus).filter_by(spider_name=name).order_by(desc(CrawlStatus.id)).first()
+                if latest_status:
+                    last_status_detail = {
+                        "api_url": latest_status.api_url,
+                        "params": latest_status.params, # JSON field usually
+                        "stage": latest_status.stage,
+                        "items_found": latest_status.items_found,
+                        "items_stored": latest_status.items_stored,
+                        "success": latest_status.success,
+                        "error_message": latest_status.error_message,
+                        "timestamp": latest_status.create_time.strftime("%H:%M:%S") if latest_status.create_time else ""
+                    }
+
         except Exception as e:
             status_text = f"DB Error: {str(e)}"
         finally:
@@ -278,6 +296,7 @@ async def get_spider_monitor(name: str):
         "current_step": current,
         "total_steps": total,
         "status_text": status_text,
+        "detail": last_status_detail,
         "logs": log_content
     }
 
