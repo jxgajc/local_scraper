@@ -28,6 +28,7 @@ os.makedirs(log_dir, exist_ok=True)
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+    sys.path.insert(0, os.path.dirname(project_root))
 
 # ==========================================
 # 模块导入
@@ -43,6 +44,17 @@ except ImportError as e:
     SessionLocal = None
     CrawlStatus = None
     SpiderProgress = None
+
+# 补采模块导入
+try:
+    import sys
+    sys.path.append(os.path.dirname(project_root))
+    from recrawl_checker import check_all_spiders, recrawl_spider, SPIDER_MAPPING as RECRAWL_SPIDER_MAP
+except ImportError as e:
+    print(f"⚠️ 补采模块导入警告: {e}")
+    RECRAWL_SPIDER_MAP = {}
+    check_all_spiders = None
+    recrawl_spider = None
 
 app = FastAPI(title="Crawler Command Center")
 templates = Jinja2Templates(directory=template_path)
@@ -409,6 +421,85 @@ async def reset_db():
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(500, str(e))
+
+@app.get("/api/recrawl/check")
+async def check_recrawl_status():
+    """检查所有爬虫的缺失情况"""
+    if not check_all_spiders:
+        return {"status": "error", "message": "补采模块未正确加载"}
+    
+    try:
+        report = check_all_spiders()
+        return {"status": "ok", "report": report}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/recrawl/check/{spider_name}")
+async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTasks):
+    """检查特定爬虫的缺失情况"""
+    if not check_all_spiders or spider_name not in RECRAWL_SPIDER_MAP:
+        return {"status": "error", "message": "无效的爬虫名称"}
+    
+    # 直接返回，实际检查在后台执行
+    # 注意：这里我们需要一个机制来查询检查结果，但为了简化，我们暂时直接执行
+    # 对于生产环境，应该使用任务队列和结果查询机制
+    try:
+        from recrawl_checker import BaseRecrawler
+        crawler = RECRAWL_SPIDER_MAP[spider_name]()
+        missing_ids = crawler.find_missing()
+        crawler.close()
+        
+        return {
+            "status": "ok", 
+            "spider_name": spider_name,
+            "missing_count": len(missing_ids),
+            "missing_ids": list(missing_ids)[:10]  # 只返回前10个示例
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/recrawl/start/{spider_name}")
+async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks):
+    """开始特定爬虫的补采"""
+    if not recrawl_spider or spider_name not in RECRAWL_SPIDER_MAP:
+        return {"status": "error", "message": "无效的爬虫名称"}
+    
+    try:
+        # 异步执行补采，避免阻塞API
+        background_tasks.add_task(recrawl_spider, spider_name)
+        return {"status": "ok", "message": f"已开始{spider_name}爬虫的补采任务"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/recrawl/start-all")
+async def start_all_recrawl(background_tasks: BackgroundTasks):
+    """一键检查并补充采集所有爬虫"""
+    if not check_all_spiders or not recrawl_spider:
+        return {"status": "error", "message": "补采模块未正确加载"}
+    
+    async def run_all_recrawl():
+        """异步执行所有爬虫的检查和补采"""
+        from recrawl_checker import BaseRecrawler
+        
+        for spider_name, crawler_class in RECRAWL_SPIDER_MAP.items():
+            try:
+                # 先检查缺失情况
+                crawler = crawler_class()
+                missing_ids = crawler.find_missing()
+                crawler.close()
+                
+                # 如果有缺失数据，执行补采
+                if missing_ids:
+                    recrawl_spider(spider_name)
+            except Exception as e:
+                print(f"处理{spider_name}爬虫时出错: {e}")
+    
+    try:
+        # 异步执行所有爬虫的补采
+        background_tasks.add_task(run_all_recrawl)
+        return {"status": "ok", "message": "已开始所有爬虫的一键检查和补采任务"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

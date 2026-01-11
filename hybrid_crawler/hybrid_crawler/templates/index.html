@@ -70,6 +70,11 @@
                             <i class="fa-solid fa-stop mr-2"></i> Stop
                         </button>
                     </div>
+                    <div class="flex gap-2">
+                        <button @click="startAllRecrawl" :disabled="isStartingAllRecrawl" class="flex-1 bg-gradient-to-r from-cyber-purple to-cyber-green text-white border border-transparent py-2 rounded hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-sm uppercase">
+                            <i class="fa-solid fa-magic mr-2"></i> {{ isStartingAllRecrawl ? '处理中...' : '一键检查并补采所有' }}
+                        </button>
+                    </div>
                     <button @click="resetDatabase" class="text-xs text-gray-600 hover:text-cyber-red underline text-center">Reset Database (Dev Only)</button>
                 </div>
 
@@ -179,6 +184,43 @@
                             </div>
                         </div>
 
+                        <!-- Recrawl Section -->
+                        <div class="border-t border-white/10 pt-4">
+                            <div class="text-xs text-gray-500 font-mono mb-2 uppercase">补充采集</div>
+                            
+                            <!-- Recrawl Controls -->
+                            <div class="space-y-3">
+                                <button @click="checkRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" 
+                                        class="w-full bg-cyber-purple/10 text-cyber-purple border border-cyber-purple/50 py-2 rounded hover:bg-cyber-purple hover:text-black transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
+                                    <i class="fa-solid fa-search mr-2"></i> 
+                                    {{ '检查中...' if isCheckingRecrawl else '检查缺失数据' }}
+                                </button>
+                                
+                                <button @click="startRecrawl" :disabled="isStartingRecrawl || isCheckingRecrawl || !recrawlStatus.missing_count" 
+                                        class="w-full bg-cyber-green/10 text-cyber-green border border-cyber-green/50 py-2 rounded hover:bg-cyber-green hover:text-black transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
+                                    <i class="fa-solid fa-refresh mr-2"></i> 
+                                    {{ '补采中...' if isStartingRecrawl else '执行补采' }}
+                                </button>
+                                
+                                <button @click="checkAndStartRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" 
+                                        class="w-full bg-gradient-to-r from-cyber-purple to-cyber-green text-white border border-transparent py-2 rounded hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
+                                    <i class="fa-solid fa-magic mr-2"></i> 
+                                    {{ '处理中...' if isCheckingRecrawl || isStartingRecrawl else '一键检查并补采' }}
+                                </button>
+                            </div>
+                            
+                            <!-- Recrawl Status -->
+                            <div v-if="recrawlStatus" class="mt-3 text-[10px] font-mono space-y-2">
+                                <div v-if="recrawlStatus.missing_count !== undefined" class="flex justify-between">
+                                    <span class="text-gray-500">缺失数据:</span>
+                                    <span :class="recrawlStatus.missing_count > 0 ? 'text-cyber-red' : 'text-cyber-green'" 
+                                          v-text="recrawlStatus.missing_count + ' 条'"></span>
+                                </div>
+                                <div v-if="recrawlStatus.message" class="text-gray-500" v-text="recrawlStatus.message"></div>
+                                <div v-if="recrawlStatus.error" class="text-cyber-red" v-text="recrawlStatus.error"></div>
+                            </div>
+                        </div>
+
                         <!-- Task Tree Section (Replaces Old Layered View) -->
                         <div class="border-t border-white/10 pt-4 flex-1 overflow-y-auto space-y-4" v-if="monitorData.task_tree && monitorData.task_tree.length > 0">
                             <div class="text-xs text-gray-500 font-mono mb-2 uppercase">Task Hierarchy</div>
@@ -276,6 +318,12 @@
                 });
                 const terminalContent = ref(null);
                 let monitorInterval = null;
+                
+                // Recrawl State
+                const recrawlStatus = ref({});
+                const isCheckingRecrawl = ref(false);
+                const isStartingRecrawl = ref(false);
+                const isStartingAllRecrawl = ref(false);
 
                 const addLog = (msg, type='info') => {
                     const colors = { info: 'text-gray-400', success: 'text-cyber-green', error: 'text-cyber-red' };
@@ -371,6 +419,104 @@
                 };
                 const selectAll = () => selected.value = spiders.value.map(s=>s.name);
 
+                // Recrawl Functions
+                const checkRecrawl = async () => {
+                    if (!monitoringSpider.value) return;
+                    
+                    isCheckingRecrawl.value = true;
+                    recrawlStatus.value = { message: '正在检查缺失数据...' };
+                    
+                    try {
+                        const spiderName = monitoringSpider.value.split('_')[0]; // 提取省份前缀
+                        const res = await fetch(`/api/recrawl/check/${spiderName}`);
+                        const data = await res.json();
+                        
+                        if (data.status === 'ok') {
+                            recrawlStatus.value = {
+                                missing_count: data.missing_count,
+                                message: `发现${data.missing_count}条缺失数据`
+                            };
+                        } else {
+                            recrawlStatus.value = {
+                                error: data.message || '检查失败'
+                            };
+                        }
+                    } catch (e) {
+                        recrawlStatus.value = {
+                            error: '检查失败: ' + e.message
+                        };
+                    } finally {
+                        isCheckingRecrawl.value = false;
+                    }
+                };
+                
+                const startRecrawl = async () => {
+                    if (!monitoringSpider.value) return;
+                    
+                    isStartingRecrawl.value = true;
+                    recrawlStatus.value = { message: '正在执行补采...' };
+                    
+                    try {
+                        const spiderName = monitoringSpider.value.split('_')[0]; // 提取省份前缀
+                        const res = await fetch(`/api/recrawl/start/${spiderName}`, { 
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        const data = await res.json();
+                        
+                        if (data.status === 'ok') {
+                            recrawlStatus.value = {
+                                message: data.message
+                            };
+                        } else {
+                            recrawlStatus.value = {
+                                error: data.message || '补采失败'
+                            };
+                        }
+                    } catch (e) {
+                        recrawlStatus.value = {
+                            error: '补采失败: ' + e.message
+                        };
+                    } finally {
+                        isStartingRecrawl.value = false;
+                    }
+                };
+                
+                const checkAndStartRecrawl = async () => {
+                    if (!monitoringSpider.value) return;
+                    
+                    // 先执行检查
+                    await checkRecrawl();
+                    
+                    // 如果检查成功且有缺失数据，自动执行补采
+                    if (recrawlStatus.value.missing_count > 0 && !recrawlStatus.value.error) {
+                        await startRecrawl();
+                    }
+                };
+                
+                const startAllRecrawl = async () => {
+                    isStartingAllRecrawl.value = true;
+                    addLog('开始一键检查并补采所有爬虫...', 'info');
+                    
+                    try {
+                        const res = await fetch('/api/recrawl/start-all', { 
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        const data = await res.json();
+                        
+                        if (data.status === 'ok') {
+                            addLog(data.message, 'success');
+                        } else {
+                            addLog(data.message || '一键补采失败', 'error');
+                        }
+                    } catch (e) {
+                        addLog('一键补采失败: ' + e.message, 'error');
+                    } finally {
+                        isStartingAllRecrawl.value = false;
+                    }
+                };
+
                 onMounted(() => {
                     fetchData();
                     setInterval(fetchData, 3000);
@@ -392,7 +538,10 @@
                     startSelected, stopSelected, resetDatabase,
                     toggleSelect, selectAll, openMonitor, closeMonitor,
                     hasSelection: computed(() => selected.value.length > 0),
-                    formatParamsShort
+                    formatParamsShort,
+                    // Recrawl
+                    recrawlStatus, isCheckingRecrawl, isStartingRecrawl, isStartingAllRecrawl,
+                    checkRecrawl, startRecrawl, checkAndStartRecrawl, startAllRecrawl
                 };
             }
         }).mount('#app');
