@@ -72,7 +72,7 @@
                     </div>
                     <div class="flex gap-2">
                         <button @click="startAllRecrawl" :disabled="isStartingAllRecrawl" class="flex-1 bg-gradient-to-r from-cyber-purple to-cyber-green text-white border border-transparent py-2 rounded hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-sm uppercase">
-                            <i class="fa-solid fa-magic mr-2"></i> {{ isStartingAllRecrawl ? '处理中...' : '一键检查并补采所有' }}
+                            <i class="fa-solid fa-magic mr-2"></i> <span v-text="isStartingAllRecrawl ? '处理中...' : '一键检查并补采所有'"></span>
                         </button>
                     </div>
                     <button @click="resetDatabase" class="text-xs text-gray-600 hover:text-cyber-red underline text-center">Reset Database (Dev Only)</button>
@@ -193,19 +193,19 @@
                                 <button @click="checkRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" 
                                         class="w-full bg-cyber-purple/10 text-cyber-purple border border-cyber-purple/50 py-2 rounded hover:bg-cyber-purple hover:text-black transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
                                     <i class="fa-solid fa-search mr-2"></i> 
-                                    {{ '检查中...' if isCheckingRecrawl else '检查缺失数据' }}
+                                    <span v-text="isCheckingRecrawl ? '检查中...' : '检查缺失数据'"></span>
                                 </button>
                                 
                                 <button @click="startRecrawl" :disabled="isStartingRecrawl || isCheckingRecrawl || !recrawlStatus.missing_count" 
                                         class="w-full bg-cyber-green/10 text-cyber-green border border-cyber-green/50 py-2 rounded hover:bg-cyber-green hover:text-black transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
                                     <i class="fa-solid fa-refresh mr-2"></i> 
-                                    {{ '补采中...' if isStartingRecrawl else '执行补采' }}
+                                    <span v-text="isStartingRecrawl ? '补采中...' : '执行补采'"></span>
                                 </button>
                                 
                                 <button @click="checkAndStartRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" 
                                         class="w-full bg-gradient-to-r from-cyber-purple to-cyber-green text-white border border-transparent py-2 rounded hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
                                     <i class="fa-solid fa-magic mr-2"></i> 
-                                    {{ '处理中...' if isCheckingRecrawl || isStartingRecrawl else '一键检查并补采' }}
+                                    <span v-text="(isCheckingRecrawl || isStartingRecrawl) ? '处理中...' : '一键检查并补采'"></span>
                                 </button>
                             </div>
                             
