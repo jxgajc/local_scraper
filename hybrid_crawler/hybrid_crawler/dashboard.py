@@ -28,7 +28,6 @@ os.makedirs(log_dir, exist_ok=True)
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-    sys.path.insert(0, os.path.dirname(project_root))
 
 # ==========================================
 # 模块导入
