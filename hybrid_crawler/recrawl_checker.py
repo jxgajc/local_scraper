@@ -71,7 +71,7 @@ class BaseRecrawler:
     def setup_logger(self):
         """配置独立日志文件"""
         if self.spider_name == "unknown": return
-        
+
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)

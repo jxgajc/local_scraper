@@ -458,41 +458,34 @@ async def stop_recrawl(task: SpiderTask):
     return {"status": "ok", "stopped": stopped}
 
 @app.get("/api/recrawl/check/{spider_name}")
-async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTasks):
-    """检查特定爬虫的缺失情况 (异步)"""
+async def check_single_recrawl(spider_name: str):
+    """检查特定爬虫的缺失情况 (同步执行并返回结果)"""
     if not check_all_spiders or spider_name not in RECRAWL_SPIDER_MAP:
         return {"status": "error", "message": "无效的爬虫名称"}
-    
+
     if spider_name in RECRAWL_TASKS:
         return {"status": "error", "message": "该爬虫正在执行检查或补采任务"}
 
-    async def run_check():
-        crawler = None
-        try:
-            from recrawl_checker import BaseRecrawler
-            crawler = RECRAWL_SPIDER_MAP[spider_name]()
-            
-            # 注册任务
-            RECRAWL_TASKS[spider_name] = crawler
-            
-            missing_ids = crawler.find_missing()
-            # 检查完成后，不需要立即关闭，或者可以关闭。
-            # 但为了简单，我们在这里关闭并移除任务
-            crawler.close()
-        except Exception as e:
-            print(f"Check error: {e}")
-        finally:
-             if spider_name in RECRAWL_TASKS:
-                 del RECRAWL_TASKS[spider_name]
-                 if crawler: crawler.close()
+    crawler = None
+    try:
+        crawler = RECRAWL_SPIDER_MAP[spider_name]()
+        RECRAWL_TASKS[spider_name] = crawler
 
-    # 提交到后台运行，不阻塞 API
-    background_tasks.add_task(run_check)
-    
-    return {
-        "status": "ok", 
-        "message": f"已开始检查 {spider_name}，请通过 Monitor 查看进度"
-    }
+        missing_ids = crawler.find_missing()
+        missing_count = len(missing_ids) if missing_ids else 0
+
+        return {
+            "status": "ok",
+            "missing_count": missing_count,
+            "message": f"发现 {missing_count} 条缺失数据"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    finally:
+        if spider_name in RECRAWL_TASKS:
+            del RECRAWL_TASKS[spider_name]
+        if crawler:
+            crawler.close()
 
 
 @app.post("/api/recrawl/start/{spider_name}")

@@ -366,7 +366,7 @@
                     if (!monitoringSpider.value) return;
 
                     try {
-                        const res = await fetch(`/api/spider/${monitoringSpider.value.split('_')[0]}/monitor`);
+                        const res = await fetch(`/api/spider/${monitoringSpider.value}/monitor`);
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         const data = await res.json();
                         monitorData.value = data;
@@ -444,14 +444,21 @@
                 const selectAll = () => selected.value = spiders.value.map(s=>s.name);
 
                 // Recrawl Functions
+                const getRecrawlSpiderName = () => {
+                    // 从完整爬虫名提取省份前缀用于补采API
+                    // 例如: fujian_drug_store -> fujian
+                    if (!monitoringSpider.value) return null;
+                    return monitoringSpider.value.split('_')[0];
+                };
+
                 const checkRecrawl = async () => {
-                    if (!monitoringSpider.value) return;
+                    const spiderName = getRecrawlSpiderName();
+                    if (!spiderName) return;
                     
                     isCheckingRecrawl.value = true;
                     recrawlStatus.value = { message: '正在检查缺失数据...' };
-                    
+
                     try {
-                        const spiderName = monitoringSpider.value.split('_')[0]; // 提取省份前缀
                         const res = await fetch(`/api/recrawl/check/${spiderName}`);
                         const data = await res.json();
                         
@@ -475,13 +482,13 @@
                 };
                 
                 const startRecrawl = async () => {
-                    if (!monitoringSpider.value) return;
-                    
+                    const spiderName = getRecrawlSpiderName();
+                    if (!spiderName) return;
+
                     isStartingRecrawl.value = true;
                     recrawlStatus.value = { message: '正在执行补采...' };
-                    
+
                     try {
-                        const spiderName = monitoringSpider.value.split('_')[0]; // 提取省份前缀
                         const res = await fetch(`/api/recrawl/start/${spiderName}`, { 
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' }
@@ -507,18 +514,18 @@
                 };
                 
                 const stopRecrawl = async () => {
-                    if (!monitoringSpider.value) return;
-                    
+                    const spiderName = getRecrawlSpiderName();
+                    if (!spiderName) return;
+
                     try {
-                        const spiderName = monitoringSpider.value.split('_')[0];
                         await fetch('/api/recrawl/stop', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ spiders: [spiderName] })
                         });
-                        addLog(`${spiderName} 停止指令已发送`, 'warn');
-                        // 前端状态会在下一次 monitor poll 时更新，或者可以手动重置
-                        // 这里我们等待后端处理，不立即重置状态，以免状态不一致
+                        addLog(`${spiderName} 停止指令已发送`, 'info');
+                        isCheckingRecrawl.value = false;
+                        isStartingRecrawl.value = false;
                     } catch (e) {
                         console.error(e);
                         addLog('停止失败: ' + e.message, 'error');
