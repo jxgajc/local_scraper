@@ -49,6 +49,11 @@ session.headers.update({
     'Accept': 'application/json, text/plain, */*',
 })
 
+from hybrid_crawler.models import SessionLocal
+from hybrid_crawler.models.spider_progress import SpiderProgress
+from sqlalchemy import func
+from sqlalchemy.dialects.mysql import insert
+
 class BaseRecrawler:
     """补采基类"""
     def __init__(self):
@@ -58,6 +63,57 @@ class BaseRecrawler:
         self.unique_id = None
         self.list_api = None
         self.detail_api = None
+        # 新增: 爬虫名称，用于更新进度
+        self.spider_name = "unknown"
+
+    def _update_progress(self, current, total, status_text="Checking"):
+        """更新前端进度条 (SpiderProgress)"""
+        if self.spider_name == "unknown": return
+
+        try:
+            # 使用独立Session防止干扰主逻辑
+            session = SessionLocal()
+            try:
+                progress_percent = 0
+                if total > 0:
+                    progress_percent = round((current / total) * 100, 2)
+                
+                # 构造数据
+                data = {
+                    'spider_name': self.spider_name,
+                    'run_id': f"recrawl_{datetime.now().strftime('%Y%m%d')}",
+                    'status': 'running',
+                    'completed_tasks': current,
+                    'total_tasks': total,
+                    'progress_percent': progress_percent,
+                    'current_stage': 'recrawl_check',
+                    'current_item': f"{status_text} | {current}/{total}",
+                    'updated_at': func.now()
+                }
+
+                # Upsert
+                stmt = insert(SpiderProgress).values(data)
+                update_dict = {
+                    'status': stmt.inserted.status,
+                    'completed_tasks': stmt.inserted.completed_tasks,
+                    'total_tasks': stmt.inserted.total_tasks,
+                    'progress_percent': stmt.inserted.progress_percent,
+                    'current_stage': stmt.inserted.current_stage,
+                    'current_item': stmt.inserted.current_item,
+                    'updated_at': func.now()
+                }
+                upsert_stmt = stmt.on_duplicate_key_update(**update_dict)
+                session.execute(upsert_stmt)
+                session.commit()
+            except Exception as e:
+                # 进度更新失败不应影响主流程
+                # self.logger.warning(f"进度更新失败: {e}") 
+                pass
+            finally:
+                session.close()
+        except:
+            pass
+
     
     def get_existing_ids(self):
         """从数据库获取已采集的唯一标识"""
@@ -124,6 +180,7 @@ class FujianRecrawler(BaseRecrawler):
     """福建爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "fujian_drug_store" # 对应 SPIDER_MAP 中的名字
         self.table_name = "drug_hospital_fujian_test"
         self.unique_id = "ext_code"
         self.list_api = "https://open.ybj.fujian.gov.cn:10013/tps-local/web/tender/plus/item-cfg-info/list"
@@ -167,6 +224,9 @@ class FujianRecrawler(BaseRecrawler):
                 
                 self.logger.info(f"福建API第{current}/{total_pages}页，获取{len(records)}条记录")
                 
+                # 更新前端进度
+                self._update_progress(current, total_pages, f"Fetching page {current}")
+
                 # 提取ext_code
                 for record in records:
                     ext_code = record.get('extCode')
@@ -205,6 +265,7 @@ class GuangdongRecrawler(BaseRecrawler):
     """广东爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "guangdong_drug_spider"
         self.table_name = "drug_hospital_guangdong_test"
         self.unique_id = "drug_code"
         self.list_api = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/queryPubonlnPage"
@@ -236,6 +297,9 @@ class GuangdongRecrawler(BaseRecrawler):
                 
                 self.logger.info(f"广东API第{current}/{total_pages}页，获取{len(records)}条记录")
                 
+                # 更新前端进度
+                self._update_progress(current, total_pages, f"Fetching page {current}")
+
                 # 提取drug_code
                 for record in records:
                     drug_code = record.get('drugCode')
@@ -271,6 +335,7 @@ class HainanRecrawler(BaseRecrawler):
     """海南爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "hainan_drug_store"
         self.table_name = "drug_shop_hainan_test"
         self.unique_id = "drug_code"
         self.list_api = "https://ybj.hainan.gov.cn/tps-local/local/web/std/drugStore/getDrugStore"
@@ -302,6 +367,9 @@ class HainanRecrawler(BaseRecrawler):
                 
                 self.logger.info(f"海南API第{current}/{total_pages}页，获取{len(records)}条记录")
                 
+                # 更新前端进度
+                self._update_progress(current, total_pages, f"Fetching page {current}")
+
                 # 提取drug_code (prodCode)
                 for record in records:
                     drug_code = record.get('prodCode')
@@ -337,6 +405,7 @@ class TianjinRecrawler(BaseRecrawler):
     """天津爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "tianjin_drug_spider"
         self.table_name = "drug_hospital_tianjin_test"
         self.unique_id = "med_id"
         self.list_api = "https://tps.ylbz.tj.gov.cn/csb/1.0.0/guideGetMedList"
@@ -363,6 +432,7 @@ class LiaoningRecrawler(BaseRecrawler):
     """辽宁爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "liaoning_drug_store"
         self.table_name = "drug_hospital_liaoning_test"
         self.unique_id = "ProductName"  # 使用药品名称作为标识
         self.list_api = "https://ggzy.ln.gov.cn/medical"
@@ -403,6 +473,7 @@ class NingxiaRecrawler(BaseRecrawler):
     """宁夏爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "ningxia_drug_store"
         self.table_name = "drug_hospital_ningxia_test"
         self.unique_id = "procurecatalogId"
         self.list_api = "https://nxyp.ylbz.nx.gov.cn/cms/recentPurchaseDetail/getRecentPurchaseDetailData.html"
@@ -435,6 +506,11 @@ class NingxiaRecrawler(BaseRecrawler):
                 
                 self.logger.info(f"宁夏API第{current}页，获取{len(records)}条记录，总计{total_records}条")
                 
+                # 更新前端进度
+                # 计算总页数
+                total_pages = (total_records + page_size - 1) // page_size if page_size > 0 else 1
+                self._update_progress(current, total_pages, f"Fetching page {current}")
+
                 # 提取procurecatalogId
                 for record in records:
                     procurecatalog_id = record.get('procurecatalogId')
@@ -470,6 +546,7 @@ class HebeiRecrawler(BaseRecrawler):
     """河北爬虫补采类"""
     def __init__(self):
         super().__init__()
+        self.spider_name = "hebei_drug_store"
         self.table_name = "drug_hospital_hebei_test"
         self.unique_id = "prodCode"
         self.list_api = "https://ylbzj.hebei.gov.cn/templates/default_pc/syyypqxjzcg/queryPubonlnDrudInfoList"
@@ -506,6 +583,11 @@ class HebeiRecrawler(BaseRecrawler):
                 
                 self.logger.info(f"河北API第{current}页，获取{len(records)}条记录，总计{total_records}条")
                 
+                # 更新前端进度
+                # 计算总页数
+                total_pages = (total_records + page_size - 1) // page_size if page_size > 0 else 1
+                self._update_progress(current, total_pages, f"Fetching page {current}")
+
                 # 提取prod_code
                 for record in records:
                     prod_code = record.get('prodCode')
