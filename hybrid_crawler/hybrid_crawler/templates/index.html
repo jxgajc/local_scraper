@@ -202,12 +202,13 @@
                                     <span v-text="isStartingRecrawl ? '补采中...' : '执行补采'"></span>
                                 </button>
                                 
-                                <button @click="stopRecrawl" v-if="isCheckingRecrawl || isStartingRecrawl"
-                                        class="w-full bg-cyber-red/10 text-cyber-red border border-cyber-red/50 py-2 rounded hover:bg-cyber-red hover:text-white transition-all font-mono text-xs uppercase animate-pulse">
+                                <button @click="stopRecrawl" :disabled="!(isCheckingRecrawl || isStartingRecrawl)"
+                                        :class="{'animate-pulse bg-cyber-red text-white hover:bg-cyber-red/90': isCheckingRecrawl || isStartingRecrawl, 'bg-cyber-red/10 text-cyber-red/50 cursor-not-allowed': !(isCheckingRecrawl || isStartingRecrawl)}"
+                                        class="w-full border border-cyber-red/50 py-2 rounded transition-all font-mono text-xs uppercase">
                                     <i class="fa-solid fa-stop mr-2"></i> 停止任务
                                 </button>
 
-                                <button @click="checkAndStartRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" v-else
+                                <button @click="checkAndStartRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl"
                                         class="w-full bg-gradient-to-r from-cyber-purple to-cyber-green text-white border border-transparent py-2 rounded hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
                                     <i class="fa-solid fa-magic mr-2"></i> 
                                     <span v-text="(isCheckingRecrawl || isStartingRecrawl) ? '处理中...' : '一键检查并补采'"></span>
@@ -363,8 +364,10 @@
 
                 const pollMonitor = async () => {
                     if (!monitoringSpider.value) return;
+
                     try {
-                        const res = await fetch(`/api/spider/${monitoringSpider.value}/monitor`);
+                        const res = await fetch(`/api/spider/${monitoringSpider.value.split('_')[0]}/monitor`);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         const data = await res.json();
                         monitorData.value = data;
                         
@@ -374,7 +377,23 @@
                                 terminalContent.value.scrollTop = terminalContent.value.scrollHeight;
                             }
                         });
-                    } catch(e) { console.error(e); }
+
+                        // Update recrawl status if active
+                        if (isCheckingRecrawl.value || isStartingRecrawl.value) {
+                            if (data.status === 'stopped' || data.status === 'finished') {
+                                // Auto-refresh recrawl status when done
+                                if (monitoringSpider.value) {
+                                    // checkRecrawlStatus(monitoringSpider.value.split('_')[0]);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Monitor poll failed:', e);
+                        monitorData.value = {
+                            ...monitorData.value,
+                            logs: `[Error] Failed to connect to log stream: ${e.message}\n${monitorData.value.logs !== 'Loading...' ? monitorData.value.logs : ''}`
+                        };
+                    }
                 };
 
                 // Format logs with colors

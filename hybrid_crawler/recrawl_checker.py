@@ -13,10 +13,16 @@ import logging
 import requests
 from datetime import datetime
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 # 添加项目根目录到Python路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# 确保能找到 hybrid_crawler 包
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 配置日志
 logging.basicConfig(
@@ -28,20 +34,6 @@ logging.basicConfig(
     ]
 )
 
-# 数据库配置 (复用现有模型的配置)
-DATABASE_URL = os.getenv('DATABASE_URL', 'mysql+pymysql://xf:xf666@192.168.0.141:3306/spiderweb')
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_size=20,
-    max_overflow=40,
-    pool_recycle=3600,
-    pool_timeout=30,
-    echo=False
-)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 # 全局请求会话，用于复用连接
 session = requests.Session()
 session.headers.update({
@@ -49,8 +41,15 @@ session.headers.update({
     'Accept': 'application/json, text/plain, */*',
 })
 
-from hybrid_crawler.models import SessionLocal
-from hybrid_crawler.models.spider_progress import SpiderProgress
+try:
+    from hybrid_crawler.models import SessionLocal
+    from hybrid_crawler.models.spider_progress import SpiderProgress
+except ImportError:
+    # 尝试调整路径再次导入
+    sys.path.insert(0, os.path.join(project_root, 'hybrid_crawler'))
+    from hybrid_crawler.models import SessionLocal
+    from hybrid_crawler.models.spider_progress import SpiderProgress
+
 from sqlalchemy import func
 from sqlalchemy.dialects.mysql import insert
 
