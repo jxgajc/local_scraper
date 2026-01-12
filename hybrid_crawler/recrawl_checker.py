@@ -404,14 +404,53 @@ class GuangdongRecrawler(BaseRecrawler):
         """执行广东爬虫补采"""
         self.logger.info("开始执行广东爬虫补采...")
         missing_ids = self.find_missing()
-        
         if not missing_ids:
             self.logger.info("没有缺失数据，无需补采")
-            return
-        
+            return 0
+        return self.recrawl_with_ids(missing_ids)
+
+    def recrawl_with_ids(self, missing_ids):
+        """使用指定的缺失ID执行补采"""
+        if not missing_ids:
+            return 0
+
         self.logger.info(f"广东爬虫需要补采{len(missing_ids)}条数据")
         self.logger.info(f"缺失的{self.unique_id}示例: {list(missing_ids)[:10]}")
-        
+
+        import subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file = os.path.join(script_dir, 'logs', f'{self.spider_name}_recrawl.log')
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+        recrawl_ids_str = ','.join(missing_ids)
+        cmd = [
+            sys.executable, '-c',
+            f'''
+import os, sys
+sys.path.insert(0, "{script_dir}")
+os.environ["SCRAPY_SETTINGS_MODULE"] = "hybrid_crawler.settings"
+from scrapy.crawler import CrawlerProcess
+from scrapy.utils.project import get_project_settings
+from hybrid_crawler.spiders.guangdong_drug_store import GuangdongDrugSpider
+process = CrawlerProcess(get_project_settings())
+process.crawl(GuangdongDrugSpider, recrawl_ids="{recrawl_ids_str}")
+process.start()
+'''
+        ]
+
+        self.logger.info(f"启动爬虫进程进行补采，日志输出到: {log_file}")
+        try:
+            with open(log_file, 'w', encoding='utf-8') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, timeout=3600)
+            if result.returncode == 0:
+                self.logger.info("爬虫补采完成")
+            else:
+                self.logger.error(f"爬虫补采失败，返回码: {result.returncode}")
+        except subprocess.TimeoutExpired:
+            self.logger.error("爬虫补采超时")
+        except Exception as e:
+            self.logger.error(f"爬虫补采异常: {e}")
+
         return len(missing_ids)
 
 class HainanRecrawler(BaseRecrawler):
@@ -630,14 +669,53 @@ class NingxiaRecrawler(BaseRecrawler):
         """执行宁夏爬虫补采"""
         self.logger.info("开始执行宁夏爬虫补采...")
         missing_ids = self.find_missing()
-        
         if not missing_ids:
             self.logger.info("没有缺失数据，无需补采")
-            return
-        
+            return 0
+        return self.recrawl_with_ids(missing_ids)
+
+    def recrawl_with_ids(self, missing_ids):
+        """使用指定的缺失ID执行补采"""
+        if not missing_ids:
+            return 0
+
         self.logger.info(f"宁夏爬虫需要补采{len(missing_ids)}条数据")
         self.logger.info(f"缺失的{self.unique_id}示例: {list(missing_ids)[:10]}")
-        
+
+        import subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file = os.path.join(script_dir, 'logs', f'{self.spider_name}_recrawl.log')
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+        recrawl_ids_str = ','.join(missing_ids)
+        cmd = [
+            sys.executable, '-c',
+            f'''
+import os, sys
+sys.path.insert(0, "{script_dir}")
+os.environ["SCRAPY_SETTINGS_MODULE"] = "hybrid_crawler.settings"
+from scrapy.crawler import CrawlerProcess
+from scrapy.utils.project import get_project_settings
+from hybrid_crawler.spiders.ningxia_drug_store import NingxiaDrugSpider
+process = CrawlerProcess(get_project_settings())
+process.crawl(NingxiaDrugSpider, recrawl_ids="{recrawl_ids_str}")
+process.start()
+'''
+        ]
+
+        self.logger.info(f"启动爬虫进程进行补采，日志输出到: {log_file}")
+        try:
+            with open(log_file, 'w', encoding='utf-8') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, timeout=3600)
+            if result.returncode == 0:
+                self.logger.info("爬虫补采完成")
+            else:
+                self.logger.error(f"爬虫补采失败，返回码: {result.returncode}")
+        except subprocess.TimeoutExpired:
+            self.logger.error("爬虫补采超时")
+        except Exception as e:
+            self.logger.error(f"爬虫补采异常: {e}")
+
         return len(missing_ids)
 
 class HebeiRecrawler(BaseRecrawler):
