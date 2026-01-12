@@ -68,6 +68,9 @@ ASYNC_TASK_STATUS = {}
 class SpiderTask(BaseModel):
     spiders: List[str]
 
+class RecrawlRequest(BaseModel):
+    missing_ids: Optional[List[str]] = None
+
 # ==========================================
 # 智能日志分析器
 # ==========================================
@@ -492,15 +495,23 @@ async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTas
 
             # 保存检查结果，供补采时使用
             RECRAWL_MISSING_IDS[spider_name] = missing_ids
+            
+            # 将 ID 列表转换为 list，方便 JSON 序列化
+            missing_ids_list = list(missing_ids) if missing_ids else []
+            preview_ids = missing_ids_list[:50] # 预览前50个
 
             ASYNC_TASK_STATUS[task_id] = {
                 "type": "check",
                 "spider_name": spider_name,
                 "status": "completed",
                 "message": f"发现 {missing_count} 条缺失数据",
-                "missing_count": missing_count
+                "missing_count": missing_count,
+                "missing_ids": preview_ids, # 返回具体的ID列表
+                "has_more": len(missing_ids_list) > 50
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             ASYNC_TASK_STATUS[task_id] = {
                 "type": "check",
                 "spider_name": spider_name,
@@ -561,7 +572,7 @@ async def get_all_tasks():
 
 
 @app.post("/api/recrawl/start/{spider_name}")
-async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks):
+async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks, body: RecrawlRequest = None):
     """开始特定爬虫的补采 - 使用检查时保存的缺失ID (异步执行)"""
     global RECRAWL_MISSING_IDS, ASYNC_TASK_STATUS
     if not recrawl_spider or spider_name not in RECRAWL_SPIDER_MAP:
@@ -570,11 +581,20 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks):
     if spider_name in RECRAWL_TASKS:
         return {"status": "error", "message": "该爬虫正在执行任务"}
 
-    # 检查是否有保存的缺失ID
-    if spider_name not in RECRAWL_MISSING_IDS or not RECRAWL_MISSING_IDS[spider_name]:
-        return {"status": "error", "message": "请先执行检查缺失数据"}
+    # 确定要补采的ID
+    missing_ids = set()
+    
+    # 1. 优先使用请求体中提供的 ID
+    if body and body.missing_ids:
+        missing_ids = set(body.missing_ids)
+        print(f"[{spider_name}] 使用用户提供的 {len(missing_ids)} 个ID进行补采")
+    # 2. 其次使用后端缓存的 ID
+    elif spider_name in RECRAWL_MISSING_IDS and RECRAWL_MISSING_IDS[spider_name]:
+        missing_ids = RECRAWL_MISSING_IDS[spider_name]
+        print(f"[{spider_name}] 使用缓存的 {len(missing_ids)} 个ID进行补采")
+    else:
+        return {"status": "error", "message": "请先执行检查缺失数据，或直接提供 ID 列表"}
 
-    missing_ids = RECRAWL_MISSING_IDS[spider_name]
     task_id = f"recrawl_{spider_name}_{int(time.time())}"
 
     ASYNC_TASK_STATUS[task_id] = {

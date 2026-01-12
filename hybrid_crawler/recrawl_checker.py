@@ -654,6 +654,7 @@ class NingxiaRecrawler(BaseRecrawler):
         api_ids = set()
         current = 1
         page_size = 100
+        empty_id_count = 0  # 统计没有ID的记录数
 
         while True:
             if self.stop_requested:
@@ -691,6 +692,8 @@ class NingxiaRecrawler(BaseRecrawler):
                     procurecatalog_id = record.get('procurecatalogId')
                     if procurecatalog_id:
                         api_ids.add(str(procurecatalog_id))
+                    else:
+                        empty_id_count += 1
 
                 # 翻页判断：当前页 >= 总页数时停止
                 if current_page >= total_pages:
@@ -702,12 +705,19 @@ class NingxiaRecrawler(BaseRecrawler):
                 break
 
         self.logger.info(f"成功从宁夏API获取{len(api_ids)}个{self.unique_id}")
+        if empty_id_count > 0:
+            self.logger.warning(f"注意：有 {empty_id_count} 条记录缺少 {self.unique_id}，已被跳过")
+        
         return api_ids
     
     def recrawl(self):
         """执行宁夏爬虫补采"""
         self.logger.info("开始执行宁夏爬虫补采...")
         missing_ids = self.find_missing()
+        
+        # 更新进度，尝试修复前端显示 undefined 的问题
+        self._update_progress(0, len(missing_ids), f"发现 {len(missing_ids)} 条缺失数据")
+        
         if not missing_ids:
             self.logger.info("没有缺失数据，无需补采")
             return 0
@@ -719,12 +729,30 @@ class NingxiaRecrawler(BaseRecrawler):
             return 0
 
         self.logger.info(f"宁夏爬虫需要补采{len(missing_ids)}条数据")
-        self.logger.info(f"缺失的{self.unique_id}示例: {list(missing_ids)[:10]}")
+        
+        # 保存缺失ID到文件，方便用户查看
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(script_dir, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        missing_ids_file = os.path.join(log_dir, f'{self.spider_name}_missing_ids.txt')
+        
+        try:
+            with open(missing_ids_file, 'w', encoding='utf-8') as f:
+                for mid in missing_ids:
+                    f.write(f"{mid}\n")
+            self.logger.info(f"已将所有缺失ID写入文件: {missing_ids_file}")
+        except Exception as e:
+            self.logger.error(f"写入缺失ID文件失败: {e}")
+
+        # 打印缺失ID，如果数量不多则全部打印
+        missing_list = list(missing_ids)
+        if len(missing_list) <= 50:
+            self.logger.info(f"缺失的{self.unique_id}列表: {missing_list}")
+        else:
+            self.logger.info(f"缺失的{self.unique_id}前50个示例: {missing_list[:50]} (完整列表见 {missing_ids_file})")
 
         import subprocess
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        log_file = os.path.join(script_dir, 'logs', f'{self.spider_name}_recrawl.log')
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        log_file = os.path.join(log_dir, f'{self.spider_name}_recrawl.log')
 
         recrawl_ids_str = ','.join(missing_ids)
         cmd = [
