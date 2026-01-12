@@ -62,6 +62,8 @@ templates = Jinja2Templates(directory=template_path)
 RUNNING_PROCESSES = {}
 # 内存中维护运行的补采任务 (spider_name -> crawler_instance)
 RECRAWL_TASKS = {}
+# 异步任务状态存储 (task_id -> status_dict)
+ASYNC_TASK_STATUS = {}
 
 class SpiderTask(BaseModel):
     spiders: List[str]
@@ -461,44 +463,107 @@ async def stop_recrawl(task: SpiderTask):
 RECRAWL_MISSING_IDS = {}  # {spider_name: set(missing_ids)}
 
 @app.get("/api/recrawl/check/{spider_name}")
-async def check_single_recrawl(spider_name: str):
-    """检查特定爬虫的缺失情况 (同步执行并返回结果)"""
-    global RECRAWL_MISSING_IDS
+async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTasks):
+    """检查特定爬虫的缺失情况 (异步执行)"""
+    global RECRAWL_MISSING_IDS, ASYNC_TASK_STATUS
     if not check_all_spiders or spider_name not in RECRAWL_SPIDER_MAP:
         return {"status": "error", "message": "无效的爬虫名称"}
 
     if spider_name in RECRAWL_TASKS:
         return {"status": "error", "message": "该爬虫正在执行检查或补采任务"}
 
-    crawler = None
-    try:
-        crawler = RECRAWL_SPIDER_MAP[spider_name]()
-        RECRAWL_TASKS[spider_name] = crawler
+    task_id = f"check_{spider_name}_{int(time.time())}"
+    ASYNC_TASK_STATUS[task_id] = {
+        "type": "check",
+        "spider_name": spider_name,
+        "status": "running",
+        "message": "正在检查缺失数据...",
+        "missing_count": 0
+    }
 
-        missing_ids = crawler.find_missing()
-        missing_count = len(missing_ids) if missing_ids else 0
+    def run_check():
+        crawler = None
+        try:
+            crawler = RECRAWL_SPIDER_MAP[spider_name]()
+            RECRAWL_TASKS[spider_name] = crawler
 
-        # 保存检查结果，供补采时使用
-        RECRAWL_MISSING_IDS[spider_name] = missing_ids
+            missing_ids = crawler.find_missing()
+            missing_count = len(missing_ids) if missing_ids else 0
 
-        return {
-            "status": "ok",
-            "missing_count": missing_count,
-            "message": f"发现 {missing_count} 条缺失数据"
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-    finally:
-        if spider_name in RECRAWL_TASKS:
-            del RECRAWL_TASKS[spider_name]
-        if crawler:
-            crawler.close()
+            # 保存检查结果，供补采时使用
+            RECRAWL_MISSING_IDS[spider_name] = missing_ids
+
+            ASYNC_TASK_STATUS[task_id] = {
+                "type": "check",
+                "spider_name": spider_name,
+                "status": "completed",
+                "message": f"发现 {missing_count} 条缺失数据",
+                "missing_count": missing_count
+            }
+        except Exception as e:
+            ASYNC_TASK_STATUS[task_id] = {
+                "type": "check",
+                "spider_name": spider_name,
+                "status": "error",
+                "message": str(e),
+                "missing_count": 0
+            }
+        finally:
+            if spider_name in RECRAWL_TASKS:
+                del RECRAWL_TASKS[spider_name]
+            if crawler:
+                crawler.close()
+
+    background_tasks.add_task(run_check)
+    return {"status": "ok", "task_id": task_id, "message": "检查任务已启动"}
+
+
+@app.get("/api/recrawl/task/{task_id}")
+async def get_task_status(task_id: str):
+    """获取异步任务状态及日志"""
+    if task_id not in ASYNC_TASK_STATUS:
+        return {"status": "error", "message": "任务不存在"}
+
+    task_info = ASYNC_TASK_STATUS[task_id]
+    spider_name = task_info.get("spider_name", "")
+
+    # 读取日志文件
+    logs = ""
+    if spider_name:
+        log_file = os.path.join(project_root, "logs", f"{spider_name}.log")
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'rb') as f:
+                    f.seek(0, 2)
+                    file_size = f.tell()
+                    read_size = 1024 * 20  # 读取最后20KB
+                    if file_size > read_size:
+                        f.seek(file_size - read_size)
+                    else:
+                        f.seek(0)
+                    logs = f.read().decode('utf-8', errors='ignore')
+            except Exception as e:
+                logs = f"读取日志失败: {e}"
+
+    return {"status": "ok", "task": task_info, "logs": logs}
+
+
+@app.get("/api/recrawl/tasks")
+async def get_all_tasks():
+    """获取所有运行中的补采任务状态"""
+    running_tasks = {k: v for k, v in ASYNC_TASK_STATUS.items() if v.get("status") == "running"}
+    active_crawlers = list(RECRAWL_TASKS.keys())
+    return {
+        "status": "ok",
+        "running_tasks": running_tasks,
+        "active_crawlers": active_crawlers
+    }
 
 
 @app.post("/api/recrawl/start/{spider_name}")
 async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks):
-    """开始特定爬虫的补采 - 使用检查时保存的缺失ID"""
-    global RECRAWL_MISSING_IDS
+    """开始特定爬虫的补采 - 使用检查时保存的缺失ID (异步执行)"""
+    global RECRAWL_MISSING_IDS, ASYNC_TASK_STATUS
     if not recrawl_spider or spider_name not in RECRAWL_SPIDER_MAP:
         return {"status": "error", "message": "无效的爬虫名称"}
 
@@ -510,8 +575,17 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks):
         return {"status": "error", "message": "请先执行检查缺失数据"}
 
     missing_ids = RECRAWL_MISSING_IDS[spider_name]
+    task_id = f"recrawl_{spider_name}_{int(time.time())}"
 
-    async def run_recrawl():
+    ASYNC_TASK_STATUS[task_id] = {
+        "type": "recrawl",
+        "spider_name": spider_name,
+        "status": "running",
+        "message": f"正在补采 {len(missing_ids)} 条数据...",
+        "total": len(missing_ids)
+    }
+
+    def run_recrawl():
         crawler = None
         try:
             from recrawl_checker import SPIDER_MAPPING
@@ -526,71 +600,96 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks):
             # 补采完成后清除保存的缺失ID
             RECRAWL_MISSING_IDS.pop(spider_name, None)
 
+            ASYNC_TASK_STATUS[task_id] = {
+                "type": "recrawl",
+                "spider_name": spider_name,
+                "status": "completed",
+                "message": f"补采完成",
+                "total": len(missing_ids)
+            }
+
         except Exception as e:
-            print(f"Recrawl error: {e}")
+            ASYNC_TASK_STATUS[task_id] = {
+                "type": "recrawl",
+                "spider_name": spider_name,
+                "status": "error",
+                "message": str(e),
+                "total": len(missing_ids)
+            }
         finally:
             if spider_name in RECRAWL_TASKS:
                 del RECRAWL_TASKS[spider_name]
             if crawler:
                 crawler.close()
 
-    try:
-        background_tasks.add_task(run_recrawl)
-        return {"status": "ok", "message": f"已开始{spider_name}爬虫的补采任务，共{len(missing_ids)}条"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    background_tasks.add_task(run_recrawl)
+    return {"status": "ok", "task_id": task_id, "message": f"已开始{spider_name}爬虫的补采任务，共{len(missing_ids)}条"}
 
 @app.post("/api/recrawl/start-all")
 async def start_all_recrawl(background_tasks: BackgroundTasks):
-    """一键检查并补充采集所有爬虫"""
+    """一键检查并补充采集所有爬虫 (异步执行)"""
+    global ASYNC_TASK_STATUS
     if not check_all_spiders or not recrawl_spider:
         return {"status": "error", "message": "补采模块未正确加载"}
-    
-    async def run_all_recrawl():
-        """异步执行所有爬虫的检查和补采"""
-        from recrawl_checker import BaseRecrawler, SPIDER_MAPPING
-        
-        # 记录总体任务状态
-        print("Starting all recrawl tasks...")
-        
+
+    task_id = f"recrawl_all_{int(time.time())}"
+    ASYNC_TASK_STATUS[task_id] = {
+        "type": "recrawl_all",
+        "status": "running",
+        "message": "正在执行一键检查并补采...",
+        "completed": [],
+        "failed": []
+    }
+
+    def run_all_recrawl():
+        """执行所有爬虫的检查和补采"""
+        from recrawl_checker import SPIDER_MAPPING
+
+        completed = []
+        failed = []
+
         for spider_name, crawler_class in SPIDER_MAPPING.items():
             crawler = None
             try:
                 # 检查是否已有任务在运行
                 if spider_name in RECRAWL_TASKS:
-                    print(f"Skipping {spider_name}, already running.")
                     continue
 
-                # 实例化并注册到全局任务列表，以便可以停止
+                # 更新状态
+                ASYNC_TASK_STATUS[task_id]["message"] = f"正在处理 {spider_name}..."
+
                 crawler = crawler_class()
                 RECRAWL_TASKS[spider_name] = crawler
-                
+
                 # 1. 检查缺失
                 missing_ids = crawler.find_missing()
-                
+
                 # 2. 如果有缺失，执行补采
                 if missing_ids:
-                    # 注意：recrawl() 内部也是同步阻塞的，但我们在 loop 中顺序执行
-                    # 如果需要并行，需要用 asyncio.gather，但数据库连接池可能不够
                     missing_count = crawler.recrawl()
                     if missing_count is not None:
                         crawler.sync_to_production()
-                
+
+                completed.append(spider_name)
+
             except Exception as e:
-                print(f"Error processing {spider_name}: {e}")
+                failed.append({"spider": spider_name, "error": str(e)})
             finally:
-                # 任务完成或出错后，清理全局注册表
                 if spider_name in RECRAWL_TASKS:
                     del RECRAWL_TASKS[spider_name]
                 if crawler:
                     crawler.close()
-    
-    try:
-        # 异步执行所有爬虫的补采
-        background_tasks.add_task(run_all_recrawl)
-        return {"status": "ok", "message": "已开始所有爬虫的一键检查和补采任务"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+
+        ASYNC_TASK_STATUS[task_id] = {
+            "type": "recrawl_all",
+            "status": "completed",
+            "message": f"完成 {len(completed)} 个，失败 {len(failed)} 个",
+            "completed": completed,
+            "failed": failed
+        }
+
+    background_tasks.add_task(run_all_recrawl)
+    return {"status": "ok", "task_id": task_id, "message": "已开始所有爬虫的一键检查和补采任务"}
 
 if __name__ == "__main__":
     import uvicorn
