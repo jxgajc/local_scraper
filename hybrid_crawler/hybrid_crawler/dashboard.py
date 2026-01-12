@@ -539,20 +539,42 @@ async def start_all_recrawl(background_tasks: BackgroundTasks):
     
     async def run_all_recrawl():
         """异步执行所有爬虫的检查和补采"""
-        from recrawl_checker import BaseRecrawler
+        from recrawl_checker import BaseRecrawler, SPIDER_MAPPING
         
-        for spider_name, crawler_class in RECRAWL_SPIDER_MAP.items():
+        # 记录总体任务状态
+        print("Starting all recrawl tasks...")
+        
+        for spider_name, crawler_class in SPIDER_MAPPING.items():
+            crawler = None
             try:
-                # 先检查缺失情况
+                # 检查是否已有任务在运行
+                if spider_name in RECRAWL_TASKS:
+                    print(f"Skipping {spider_name}, already running.")
+                    continue
+
+                # 实例化并注册到全局任务列表，以便可以停止
                 crawler = crawler_class()
-                missing_ids = crawler.find_missing()
-                crawler.close()
+                RECRAWL_TASKS[spider_name] = crawler
                 
-                # 如果有缺失数据，执行补采
+                # 1. 检查缺失
+                missing_ids = crawler.find_missing()
+                
+                # 2. 如果有缺失，执行补采
                 if missing_ids:
-                    recrawl_spider(spider_name)
+                    # 注意：recrawl() 内部也是同步阻塞的，但我们在 loop 中顺序执行
+                    # 如果需要并行，需要用 asyncio.gather，但数据库连接池可能不够
+                    missing_count = crawler.recrawl()
+                    if missing_count is not None:
+                        crawler.sync_to_production()
+                
             except Exception as e:
-                print(f"处理{spider_name}爬虫时出错: {e}")
+                print(f"Error processing {spider_name}: {e}")
+            finally:
+                # 任务完成或出错后，清理全局注册表
+                if spider_name in RECRAWL_TASKS:
+                    del RECRAWL_TASKS[spider_name]
+                if crawler:
+                    crawler.close()
     
     try:
         # 异步执行所有爬虫的补采

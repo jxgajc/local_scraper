@@ -57,15 +57,40 @@ class BaseRecrawler:
     """补采基类"""
     def __init__(self):
         self.db_session = SessionLocal()
+        self.spider_name = "unknown" # 初始化默认值，子类会覆盖
         self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 稍后在 setup_logger 中配置，因为子类还没设置 spider_name
+        
         self.table_name = None
         self.unique_id = None
         self.list_api = None
         self.detail_api = None
-        # 新增: 爬虫名称，用于更新进度
-        self.spider_name = "unknown"
-        # 新增: 停止标志
         self.stop_requested = False
+
+    def setup_logger(self):
+        """配置独立日志文件"""
+        if self.spider_name == "unknown": return
+        
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        log_file = os.path.join(log_dir, f"{self.spider_name}.log")
+        
+        # 清除旧的 handlers 防止重复
+        self.logger.handlers = []
+        self.logger.setLevel(logging.INFO)
+        
+        # 文件 Handler
+        file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        self.logger.addHandler(file_handler)
+        
+        # 控制台 Handler (可选，方便调试)
+        # console_handler = logging.StreamHandler()
+        # console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        # self.logger.addHandler(console_handler)
 
     def stop(self):
         """请求停止任务"""
@@ -187,6 +212,7 @@ class FujianRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "fujian_drug_store" # 对应 SPIDER_MAP 中的名字
+        self.setup_logger() # 初始化日志
         self.table_name = "drug_hospital_fujian_test"
         self.unique_id = "ext_code"
         self.list_api = "https://open.ybj.fujian.gov.cn:10013/tps-local/web/tender/plus/item-cfg-info/list"
@@ -276,6 +302,7 @@ class GuangdongRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "guangdong_drug_spider"
+        self.setup_logger()
         self.table_name = "drug_hospital_guangdong_test"
         self.unique_id = "drug_code"
         self.list_api = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/queryPubonlnPage"
@@ -350,6 +377,7 @@ class HainanRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "hainan_drug_store"
+        self.setup_logger()
         self.table_name = "drug_shop_hainan_test"
         self.unique_id = "drug_code"
         self.list_api = "https://ybj.hainan.gov.cn/tps-local/local/web/std/drugStore/getDrugStore"
@@ -424,6 +452,7 @@ class TianjinRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "tianjin_drug_spider"
+        self.setup_logger()
         self.table_name = "drug_hospital_tianjin_test"
         self.unique_id = "med_id"
         self.list_api = "https://tps.ylbz.tj.gov.cn/csb/1.0.0/guideGetMedList"
@@ -451,6 +480,7 @@ class LiaoningRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "liaoning_drug_store"
+        self.setup_logger()
         self.table_name = "drug_hospital_liaoning_test"
         self.unique_id = "ProductName"  # 使用药品名称作为标识
         self.list_api = "https://ggzy.ln.gov.cn/medical"
@@ -492,6 +522,7 @@ class NingxiaRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "ningxia_drug_store"
+        self.setup_logger()
         self.table_name = "drug_hospital_ningxia_test"
         self.unique_id = "procurecatalogId"
         self.list_api = "https://nxyp.ylbz.nx.gov.cn/cms/recentPurchaseDetail/getRecentPurchaseDetailData.html"
@@ -569,6 +600,7 @@ class HebeiRecrawler(BaseRecrawler):
     def __init__(self):
         super().__init__()
         self.spider_name = "hebei_drug_store"
+        self.setup_logger()
         self.table_name = "drug_hospital_hebei_test"
         self.unique_id = "prodCode"
         self.list_api = "https://ylbzj.hebei.gov.cn/templates/default_pc/syyypqxjzcg/queryPubonlnDrudInfoList"
