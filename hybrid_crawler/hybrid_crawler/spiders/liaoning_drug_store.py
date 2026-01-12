@@ -26,16 +26,21 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     # 药品列表API URL
     list_api_url = "https://ggzy.ln.gov.cn/medical" 
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.spider_log = get_spider_logger(self.name)
         self.crawl_id = str(uuid.uuid4())
-        
+
+        # 补采模式：只采集指定的 goodscode
+        self.recrawl_ids = set(recrawl_ids.split(',')) if recrawl_ids else None
+        self.recrawl_mode = self.recrawl_ids is not None
+
         # 加载关键词
         try:
             df_name = pd.read_excel(excel_path)
             self.product_list = df_name.loc[:, "采集关键字"].to_list()
-            self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，加载关键词: {len(self.product_list)} 个")
+            mode_str = f"补采模式，目标 {len(self.recrawl_ids)} 条" if self.recrawl_mode else "全量采集"
+            self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，模式: {mode_str}，加载关键词: {len(self.product_list)} 个")
         except Exception as e:
             self.spider_log.error(f"❌ 关键词文件加载失败: {e}")
             self.product_list = []
@@ -103,6 +108,13 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             item_count = 0
             # 1. 处理当前页的每一条药品数据
             for drug_item in rows:
+                goods_code = drug_item.get('goodscode')
+                # 补采模式：跳过不在目标列表中的记录
+                if self.recrawl_mode:
+                    if goods_code not in self.recrawl_ids:
+                        continue
+                    self.recrawl_ids.discard(goods_code)  # 已处理，从列表移除
+
                 yield self._create_item(drug_item, current_page)
                 item_count += 1
 
@@ -183,6 +195,13 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             
             item_count = 0
             for item in rows:
+                goods_code = item.get('goodscode')
+                # 补采模式：跳过不在目标列表中的记录
+                if self.recrawl_mode:
+                    if goods_code not in self.recrawl_ids:
+                        continue
+                    self.recrawl_ids.discard(goods_code)  # 已处理，从列表移除
+
                 yield self._create_item(item, page_num)
                 item_count += 1
             

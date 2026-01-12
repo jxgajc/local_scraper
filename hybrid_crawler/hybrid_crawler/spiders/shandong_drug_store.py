@@ -25,19 +25,24 @@ class ShandongDrugSpider(SpiderStatusMixin, scrapy.Spider):
     list_api_url = "https://ypjc.ybj.shandong.gov.cn/code/hsaTrade/tps-local/web/gwml/listDrug"
     hospital_api_url = "https://ypjc.ybj.shandong.gov.cn/code/hsaTrade/tps-local/web/gwml/listHospital"
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.spider_log = get_spider_logger(self.name)
         self.crawl_id = str(uuid.uuid4())
-        
+
+        # 补采模式：只采集指定的 prodCode
+        self.recrawl_ids = set(recrawl_ids.split(',')) if recrawl_ids else None
+        self.recrawl_mode = self.recrawl_ids is not None
+
         # 初始化 OCR
         self.ocr = ddddocr.DdddOcr(show_ad=False)
-        
+
         # 加载关键词
         try:
             df_name = pd.read_excel(excel_path)
             self.product_names = df_name.loc[:, "采集关键字"].to_list()
-            self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，加载关键词: {len(self.product_names)} 个")
+            mode_str = f"补采模式，目标 {len(self.recrawl_ids)} 条" if self.recrawl_mode else "全量采集"
+            self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，模式: {mode_str}，加载关键词: {len(self.product_names)} 个")
         except Exception as e:
             self.spider_log.error(f"❌ 关键词文件加载失败: {e}")
             self.product_names = []
@@ -226,6 +231,13 @@ class ShandongDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
             item_count = 0
             for record in records:
+                prod_code = record.get('prodCode')
+                # 补采模式：跳过不在目标列表中的记录
+                if self.recrawl_mode:
+                    if prod_code not in self.recrawl_ids:
+                        continue
+                    self.recrawl_ids.discard(prod_code)  # 已处理，从列表移除
+
                 base_info = {
                     'prodCode': record.get('prodCode'),
                     'prodName': record.get('prodName'),
@@ -293,6 +305,11 @@ class ShandongDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
             # 翻页逻辑
             if current_page < total_pages:
+                # 补采模式：如果所有目标都已采集完成，提前结束
+                if self.recrawl_mode and not self.recrawl_ids:
+                    self.spider_log.info(f"✅ 补采模式：所有目标数据已采集完成")
+                    return
+
                 self.spider_log.info(f"🔄 准备采集关键词 [{current_keyword}] 下一页 [{current_page + 1}/{total_pages}]")
                 next_page = current_page + 1
                 new_payload = current_payload.copy()

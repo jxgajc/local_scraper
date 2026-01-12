@@ -23,11 +23,15 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     # 存储cookie
     cookies = {}
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.spider_log = get_spider_logger(self.name)
         self.crawl_id = str(uuid.uuid4())
-        self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}")
+        # 补采模式：只采集指定的 prodCode
+        self.recrawl_ids = set(recrawl_ids.split(',')) if recrawl_ids else None
+        self.recrawl_mode = self.recrawl_ids is not None
+        mode_str = f"补采模式，目标 {len(self.recrawl_ids)} 条" if self.recrawl_mode else "全量采集"
+        self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，模式: {mode_str}")
     
 
     custom_settings = {
@@ -100,6 +104,13 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             item_count = 0
             # 1. 处理当前页的每一条药品数据 -> 发起详情请求
             for drug_item in records:
+                prod_code = drug_item.get("prodCode")
+                # 补采模式：跳过不在目标列表中的记录
+                if self.recrawl_mode:
+                    if prod_code not in self.recrawl_ids:
+                        continue
+                    self.recrawl_ids.discard(prod_code)  # 已处理，从列表移除
+
                 # 传入 page_crawl_id 作为 parent_crawl_id
                 for request in self._request_hospital_detail(drug_item, current, page_crawl_id):
                     yield request
@@ -184,6 +195,13 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             
             item_count = 0
             for drug_item in records:
+                prod_code = drug_item.get("prodCode")
+                # 补采模式：跳过不在目标列表中的记录
+                if self.recrawl_mode:
+                    if prod_code not in self.recrawl_ids:
+                        continue
+                    self.recrawl_ids.discard(prod_code)  # 已处理，从列表移除
+
                 for request in self._request_hospital_detail(drug_item, page_num, page_crawl_id):
                     yield request
                     item_count += 1

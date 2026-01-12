@@ -17,11 +17,15 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
     list_api_url = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/queryPubonlnPage"
     hospital_api_url = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/getPurcHospitalInfoListNew"
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.spider_log = get_spider_logger(self.name)
         self.crawl_id = str(uuid.uuid4())
-        self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}")
+        # 补采模式：只采集指定的 drug_code
+        self.recrawl_ids = set(recrawl_ids.split(',')) if recrawl_ids else None
+        self.recrawl_mode = self.recrawl_ids is not None
+        mode_str = f"补采模式，目标 {len(self.recrawl_ids)} 条" if self.recrawl_mode else "全量采集"
+        self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，模式: {mode_str}")
 
     custom_settings = {
         'CONCURRENT_REQUESTS': 5,
@@ -104,6 +108,13 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
             item_count = 0
             for record in records:
+                drug_code = record.get('drugCode')
+                # 补采模式：跳过不在目标列表中的记录
+                if self.recrawl_mode:
+                    if drug_code not in self.recrawl_ids:
+                        continue
+                    self.recrawl_ids.discard(drug_code)  # 已处理，从列表移除
+
                 # 1. Map drug info to Item (Lossless mapping)
                 base_info = {
                     'drug_id': record.get('drugId'),
@@ -189,6 +200,11 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
             # Pagination for Drug List
             if current_page < total_pages:
+                # 补采模式：如果所有目标都已采集完成，提前结束
+                if self.recrawl_mode and not self.recrawl_ids:
+                    self.spider_log.info(f"✅ 补采模式：所有目标数据已采集完成")
+                    return
+
                 self.spider_log.info(f"🔄 准备采集下一页药品列表 [{current_page + 1}/{total_pages}]")
                 next_page = current_page + 1
                 new_payload = current_payload.copy()
