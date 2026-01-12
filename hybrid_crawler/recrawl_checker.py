@@ -65,6 +65,13 @@ class BaseRecrawler:
         self.detail_api = None
         # 新增: 爬虫名称，用于更新进度
         self.spider_name = "unknown"
+        # 新增: 停止标志
+        self.stop_requested = False
+
+    def stop(self):
+        """请求停止任务"""
+        self.stop_requested = True
+        self.logger.info(f"[{self.spider_name}] 收到停止信号...")
 
     def _update_progress(self, current, total, status_text="Checking"):
         """更新前端进度条 (SpiderProgress)"""
@@ -194,6 +201,10 @@ class FujianRecrawler(BaseRecrawler):
         page_size = 1000
         
         while True:
+            if self.stop_requested:
+                self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
+                break
+
             try:
                 payload = {
                     "druglistName": "",
@@ -279,6 +290,10 @@ class GuangdongRecrawler(BaseRecrawler):
         page_size = 500
         
         while True:
+            if self.stop_requested:
+                self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
+                break
+
             try:
                 payload = {
                     "current": current,
@@ -349,6 +364,10 @@ class HainanRecrawler(BaseRecrawler):
         page_size = 500
         
         while True:
+            if self.stop_requested:
+                self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
+                break
+
             try:
                 params = {
                     "current": current,
@@ -487,6 +506,10 @@ class NingxiaRecrawler(BaseRecrawler):
         page_size = 100
         
         while True:
+            if self.stop_requested:
+                self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
+                break
+
             try:
                 form_data = {
                     "_search": "false",
@@ -564,6 +587,10 @@ class HebeiRecrawler(BaseRecrawler):
         }
         
         while True:
+            if self.stop_requested:
+                self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
+                break
+
             try:
                 params = {
                     "pageNo": current,

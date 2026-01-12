@@ -202,7 +202,12 @@
                                     <span v-text="isStartingRecrawl ? '补采中...' : '执行补采'"></span>
                                 </button>
                                 
-                                <button @click="checkAndStartRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" 
+                                <button @click="stopRecrawl" v-if="isCheckingRecrawl || isStartingRecrawl"
+                                        class="w-full bg-cyber-red/10 text-cyber-red border border-cyber-red/50 py-2 rounded hover:bg-cyber-red hover:text-white transition-all font-mono text-xs uppercase animate-pulse">
+                                    <i class="fa-solid fa-stop mr-2"></i> 停止任务
+                                </button>
+
+                                <button @click="checkAndStartRecrawl" :disabled="isCheckingRecrawl || isStartingRecrawl" v-else
                                         class="w-full bg-gradient-to-r from-cyber-purple to-cyber-green text-white border border-transparent py-2 rounded hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed font-mono text-xs uppercase">
                                     <i class="fa-solid fa-magic mr-2"></i> 
                                     <span v-text="(isCheckingRecrawl || isStartingRecrawl) ? '处理中...' : '一键检查并补采'"></span>
@@ -482,6 +487,25 @@
                     }
                 };
                 
+                const stopRecrawl = async () => {
+                    if (!monitoringSpider.value) return;
+                    
+                    try {
+                        const spiderName = monitoringSpider.value.split('_')[0];
+                        await fetch('/api/recrawl/stop', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ spiders: [spiderName] })
+                        });
+                        addLog(`${spiderName} 停止指令已发送`, 'warn');
+                        // 前端状态会在下一次 monitor poll 时更新，或者可以手动重置
+                        // 这里我们等待后端处理，不立即重置状态，以免状态不一致
+                    } catch (e) {
+                        console.error(e);
+                        addLog('停止失败: ' + e.message, 'error');
+                    }
+                };
+
                 const checkAndStartRecrawl = async () => {
                     if (!monitoringSpider.value) return;
                     
@@ -541,7 +565,7 @@
                     formatParamsShort,
                     // Recrawl
                     recrawlStatus, isCheckingRecrawl, isStartingRecrawl, isStartingAllRecrawl,
-                    checkRecrawl, startRecrawl, checkAndStartRecrawl, startAllRecrawl
+                    checkRecrawl, startRecrawl, checkAndStartRecrawl, startAllRecrawl, stopRecrawl
                 };
             }
         }).mount('#app');
