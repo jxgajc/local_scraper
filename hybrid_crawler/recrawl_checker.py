@@ -63,15 +63,35 @@ class BaseRecrawler:
         """从数据库获取已采集的唯一标识"""
         try:
             self.logger.info(f"从数据库获取{self.table_name}表中的现有{self.unique_id}...")
-            # 注意：使用实际的表名，去掉_test后缀
-            real_table_name = self.table_name.replace('_test', '') if '_test' in self.table_name else self.table_name
-            sql = text(f"SELECT DISTINCT {self.unique_id} FROM {real_table_name}")
+            # 修正：直接查询 self.table_name (_test表)，作为待检查的原始表格
+            sql = text(f"SELECT DISTINCT {self.unique_id} FROM {self.table_name}")
             result = self.db_session.execute(sql)
             existing_ids = {row[0] for row in result if row[0] is not None}
             self.logger.info(f"成功获取{len(existing_ids)}个现有{self.unique_id}")
             return existing_ids
         except Exception as e:
             self.logger.error(f"获取现有ID失败: {e}")
+            raise
+    
+    def sync_to_production(self):
+        """将_test表的数据同步到正式表"""
+        if not self.table_name.endswith('_test'):
+            self.logger.warning(f"表名 {self.table_name} 不以 _test 结尾，跳过同步")
+            return 0
+            
+        prod_table = self.table_name.replace('_test', '')
+        try:
+            self.logger.info(f"开始将数据从 {self.table_name} 同步到 {prod_table}...")
+            # 使用 INSERT IGNORE ... SELECT 进行增量同步并去重
+            sql = text(f"INSERT IGNORE INTO {prod_table} SELECT * FROM {self.table_name}")
+            result = self.db_session.execute(sql)
+            self.db_session.commit()
+            
+            self.logger.info(f"同步完成，{prod_table} 受影响行数: {result.rowcount}")
+            return result.rowcount
+        except Exception as e:
+            self.db_session.rollback()
+            self.logger.error(f"同步到正式表失败: {e}")
             raise
     
     def fetch_api_total(self):
@@ -363,9 +383,7 @@ class LiaoningRecrawler(BaseRecrawler):
         """从数据库获取已采集的药品名称"""
         try:
             self.logger.info(f"从数据库获取{self.table_name}表中的现有{self.unique_id}...")
-            # 注意：使用实际的表名，去掉_test后缀
-            real_table_name = self.table_name.replace('_test', '') if '_test' in self.table_name else self.table_name
-            sql = text(f"SELECT DISTINCT ProductName FROM {real_table_name}")
+            sql = text(f"SELECT DISTINCT ProductName FROM {self.table_name}")
             result = self.db_session.execute(sql)
             existing_ids = {row[0] for row in result if row[0] is not None}
             self.logger.info(f"成功获取{len(existing_ids)}个现有{self.unique_id}")
@@ -583,6 +601,12 @@ def recrawl_spider(spider_name):
     try:
         missing_count = crawler.recrawl()
         logger.info(f"{spider_name}爬虫补采完成，补采了{missing_count}条数据")
+        
+        # 同步到正式表
+        if missing_count is not None:
+             logger.info(f"正在将{spider_name}的新数据同步到正式表...")
+             crawler.sync_to_production()
+             
         return True
     except Exception as e:
         logger.error(f"执行{spider_name}爬虫补采失败: {e}")
