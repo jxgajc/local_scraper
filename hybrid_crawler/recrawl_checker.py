@@ -576,7 +576,7 @@ class NingxiaRecrawler(BaseRecrawler):
         api_ids = set()
         current = 1
         page_size = 100
-        
+
         while True:
             if self.stop_requested:
                 self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
@@ -590,36 +590,39 @@ class NingxiaRecrawler(BaseRecrawler):
                     "sidx": "",
                     "sord": "asc"
                 }
-                
+
                 self.logger.info(f"请求宁夏API第{current}页...")
                 response = session.post(self.list_api, data=form_data, timeout=30)
                 response.raise_for_status()
                 res_json = response.json()
-                
-                total_records = res_json.get("total", 0)
-                records = res_json.get("rows", [])
-                
-                self.logger.info(f"宁夏API第{current}页，获取{len(records)}条记录，总计{total_records}条")
-                
+
+                # 注意：宁夏API返回结构
+                # total = 总页数, page = 当前页, records = 总记录数
+                total_pages = int(res_json.get("total", 0))
+                current_page = int(res_json.get("page", 1))
+                total_records = int(res_json.get("records", 0))
+                rows = res_json.get("rows", [])
+
+                self.logger.info(f"宁夏API第{current_page}/{total_pages}页，获取{len(rows)}条记录，总计{total_records}条")
+
                 # 更新前端进度
-                # 计算总页数
-                total_pages = (total_records + page_size - 1) // page_size if page_size > 0 else 1
-                self._update_progress(current, total_pages, f"Fetching page {current}")
+                self._update_progress(current_page, total_pages, f"Fetching page {current_page}/{total_pages}")
 
                 # 提取procurecatalogId
-                for record in records:
+                for record in rows:
                     procurecatalog_id = record.get('procurecatalogId')
                     if procurecatalog_id:
-                        api_ids.add(procurecatalog_id)
-                
-                if len(api_ids) >= total_records:
+                        api_ids.add(str(procurecatalog_id))
+
+                # 翻页判断：当前页 >= 总页数时停止
+                if current_page >= total_pages:
                     break
-                
+
                 current += 1
             except Exception as e:
                 self.logger.error(f"请求宁夏API失败: {e}")
                 break
-        
+
         self.logger.info(f"成功从宁夏API获取{len(api_ids)}个{self.unique_id}")
         return api_ids
     
@@ -654,11 +657,11 @@ class HebeiRecrawler(BaseRecrawler):
         api_ids = set()
         current = 1
         page_size = 1000
-        
+
         headers = {
             "prodType": "2"
         }
-        
+
         while True:
             if self.stop_requested:
                 self.logger.warning(f"[{self.spider_name}] 任务被用户中止")
@@ -671,37 +674,37 @@ class HebeiRecrawler(BaseRecrawler):
                     "prodName": "",
                     "prodentpName": ""
                 }
-                
+
                 self.logger.info(f"请求河北API第{current}页...")
                 response = session.get(self.list_api, params=params, headers=headers, timeout=30)
                 response.raise_for_status()
                 res_json = response.json()
-                
+
                 data_block = res_json.get("data", {})
                 records = data_block.get("list", [])
-                total_records = data_block.get("total", 0)
-                
-                self.logger.info(f"河北API第{current}页，获取{len(records)}条记录，总计{total_records}条")
-                
+                total_pages = int(data_block.get("pages", 0))
+                current_page = int(data_block.get("pageNo", 1))
+
+                self.logger.info(f"河北API第{current_page}/{total_pages}页，获取{len(records)}条记录")
+
                 # 更新前端进度
-                # 计算总页数
-                total_pages = (total_records + page_size - 1) // page_size if page_size > 0 else 1
-                self._update_progress(current, total_pages, f"Fetching page {current}")
+                self._update_progress(current_page, total_pages, f"Fetching page {current_page}/{total_pages}")
 
                 # 提取prod_code
                 for record in records:
                     prod_code = record.get('prodCode')
                     if prod_code:
                         api_ids.add(prod_code)
-                
-                if len(api_ids) >= total_records:
+
+                # 翻页判断
+                if current_page >= total_pages:
                     break
-                
+
                 current += 1
             except Exception as e:
                 self.logger.error(f"请求河北API失败: {e}")
                 break
-        
+
         self.logger.info(f"成功从河北API获取{len(api_ids)}个{self.unique_id}")
         return api_ids
     
