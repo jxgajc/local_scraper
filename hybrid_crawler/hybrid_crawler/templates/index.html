@@ -445,10 +445,72 @@
 
                 // Recrawl Functions
                 const getRecrawlSpiderName = () => {
-                    // 从完整爬虫名提取省份前缀用于补采API
-                    // 例如: fujian_drug_store -> fujian
+                    // 直接使用完整爬虫名
                     if (!monitoringSpider.value) return null;
-                    return monitoringSpider.value.split('_')[0];
+                    return monitoringSpider.value;
+                };
+
+                // 通用轮询函数
+                const pollRecrawlTask = async (taskId, type) => {
+                    const poll = async () => {
+                        try {
+                            const res = await fetch(`/api/recrawl/task/${taskId}`);
+                            const data = await res.json();
+                            
+                            if (data.status === 'ok') {
+                                const task = data.task;
+                                
+                                // 更新状态文本
+                                if (type === 'check') {
+                                    recrawlStatus.value = {
+                                        message: task.message,
+                                        missing_count: task.missing_count
+                                    };
+                                } else {
+                                    recrawlStatus.value = {
+                                        message: task.message
+                                    };
+                                }
+
+                                // 检查是否结束
+                                if (task.status === 'completed') {
+                                    if (type === 'check') {
+                                        isCheckingRecrawl.value = false;
+                                        recrawlStatus.value.message = `检查完成: ${task.message}`;
+                                    } else {
+                                        isStartingRecrawl.value = false;
+                                        recrawlStatus.value.message = `补采完成: ${task.message}`;
+                                    }
+                                    return true; // Stop polling
+                                } else if (task.status === 'error') {
+                                    if (type === 'check') isCheckingRecrawl.value = false;
+                                    else isStartingRecrawl.value = false;
+                                    
+                                    recrawlStatus.value.error = task.message;
+                                    return true; // Stop polling
+                                }
+                                
+                                // 更新日志显示 (如果正在监控该爬虫)
+                                if (data.logs && monitoringSpider.value === task.spider_name) {
+                                     // 这里简单地将任务日志附加到当前显示中，或者让用户知道有新日志
+                                     // 实际上 monitor 接口可能已经包含了主日志，这里是异步任务的日志，可能需要合并显示
+                                     // 暂时不做特殊处理，依赖 monitor 接口读取日志文件
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Task poll failed:', e);
+                        }
+                        return false; // Continue polling
+                    };
+
+                    // 立即执行一次
+                    if (await poll()) return;
+
+                    const interval = setInterval(async () => {
+                        if (await poll()) {
+                            clearInterval(interval);
+                        }
+                    }, 1000);
                 };
 
                 const checkRecrawl = async () => {
@@ -456,27 +518,20 @@
                     if (!spiderName) return;
                     
                     isCheckingRecrawl.value = true;
-                    recrawlStatus.value = { message: '正在检查缺失数据...' };
+                    recrawlStatus.value = { message: '正在启动检查任务...' };
 
                     try {
                         const res = await fetch(`/api/recrawl/check/${spiderName}`);
                         const data = await res.json();
                         
                         if (data.status === 'ok') {
-                            recrawlStatus.value = {
-                                missing_count: data.missing_count,
-                                message: `发现${data.missing_count}条缺失数据`
-                            };
+                            pollRecrawlTask(data.task_id, 'check');
                         } else {
-                            recrawlStatus.value = {
-                                error: data.message || '检查失败'
-                            };
+                            recrawlStatus.value = { error: data.message || '启动检查失败' };
+                            isCheckingRecrawl.value = false;
                         }
                     } catch (e) {
-                        recrawlStatus.value = {
-                            error: '检查失败: ' + e.message
-                        };
-                    } finally {
+                        recrawlStatus.value = { error: '请求失败: ' + e.message };
                         isCheckingRecrawl.value = false;
                     }
                 };
@@ -486,7 +541,7 @@
                     if (!spiderName) return;
 
                     isStartingRecrawl.value = true;
-                    recrawlStatus.value = { message: '正在执行补采...' };
+                    recrawlStatus.value = { message: '正在启动补采任务...' };
 
                     try {
                         const res = await fetch(`/api/recrawl/start/${spiderName}`, { 
@@ -496,19 +551,13 @@
                         const data = await res.json();
                         
                         if (data.status === 'ok') {
-                            recrawlStatus.value = {
-                                message: data.message
-                            };
+                             pollRecrawlTask(data.task_id, 'recrawl');
                         } else {
-                            recrawlStatus.value = {
-                                error: data.message || '补采失败'
-                            };
+                            recrawlStatus.value = { error: data.message || '启动补采失败' };
+                            isStartingRecrawl.value = false;
                         }
                     } catch (e) {
-                        recrawlStatus.value = {
-                            error: '补采失败: ' + e.message
-                        };
-                    } finally {
+                        recrawlStatus.value = { error: '请求失败: ' + e.message };
                         isStartingRecrawl.value = false;
                     }
                 };
