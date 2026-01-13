@@ -8,7 +8,7 @@ NEWSPIDER_MODULE = 'hybrid_crawler.spiders'
 # 数据库配置
 # =============================================================================
 # 优先从环境变量获取，否则使用默认值
-DATABASE_URL = os.getenv('DATABASE_URL', 'mysql+pymysql://xf:xf666@192.168.0.141:3306/spiderweb')
+DATABASE_URL = os.getenv('DATABASE_URL', 'mysql+pymysql://xf:xf666@192.168.0.141:3306/spider_once')
 # 将其注入到环境变量中，以便 models 模块（非 Scrapy 上下文）也能获取
 os.environ['DATABASE_URL'] = DATABASE_URL
 

@@ -107,8 +107,12 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
                 record = LiaoningDrug(
                     goodscode=goods_code,
                     ProductName=drug_info.get('ProductName'),
-                    Spec=drug_info.get('Spec'),
-                    Manufacturer=drug_info.get('Manufacturer'),
+                    MedicineModelName=drug_info.get('MedicineModelName'),
+                    Outlookc=drug_info.get('Outlookc'),
+                    HospitalName=drug_info.get('HospitalName'),
+                    Pack=drug_info.get('Pack'),
+                    GoodsName=drug_info.get('GoodsName'),
+                    SubmiTime=drug_info.get('SubmiTime'),
                     collect_time=datetime.now()
                 )
                 record.md5_id = hashlib.md5(goods_code.encode()).hexdigest()
