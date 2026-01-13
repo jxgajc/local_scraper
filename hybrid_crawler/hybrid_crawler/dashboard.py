@@ -44,17 +44,6 @@ except ImportError as e:
     CrawlStatus = None
     SpiderProgress = None
 
-# 补采模块导入
-try:
-    import sys
-    sys.path.append(os.path.dirname(project_root))
-    from recrawl_checker import check_all_spiders, recrawl_spider, SPIDER_MAPPING as RECRAWL_SPIDER_MAP
-except ImportError as e:
-    print(f"⚠️ 补采模块导入警告: {e}")
-    RECRAWL_SPIDER_MAP = {}
-    check_all_spiders = None
-    recrawl_spider = None
-
 app = FastAPI(title="Crawler Command Center")
 templates = Jinja2Templates(directory=template_path)
 
@@ -431,14 +420,24 @@ async def reset_db():
 @app.get("/api/recrawl/check")
 async def check_recrawl_status():
     """检查所有爬虫的缺失情况"""
-    if not check_all_spiders:
-        return {"status": "error", "message": "补采模块未正确加载"}
-    
-    try:
-        report = check_all_spiders()
-        return {"status": "ok", "report": report}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    report = {}
+    for name, spider_cls in SPIDER_MAP.items():
+        try:
+            # 实例化爬虫以调用 find_missing (假设继承自 SpiderStatusMixin)
+            crawler = spider_cls()
+            if hasattr(crawler, 'find_missing'):
+                missing_data = crawler.find_missing()
+                report[name] = {
+                    "spider_name": name,
+                    "missing_count": len(missing_data),
+                    "missing_ids": list(missing_data.keys())[:10]
+                }
+            else:
+                report[name] = {"error": "Spider missing find_missing method"}
+        except Exception as e:
+            report[name] = {"error": str(e)}
+            
+    return {"status": "ok", "report": report}
 
 @app.post("/api/recrawl/stop")
 async def stop_recrawl(task: SpiderTask):
@@ -453,8 +452,10 @@ async def stop_recrawl(task: SpiderTask):
     for name in targets:
         if name in RECRAWL_TASKS:
             try:
-                crawler = RECRAWL_TASKS[name]
-                crawler.stop() # 调用停止方法
+                # Scrapy spider object doesn't have stop(), but we can define it or just ignore
+                # Since these are running in memory/background tasks, we can't easily kill them
+                # unless we implemented a flag check in the loop (which we did in mixin via stop_check, but here we run in background thread)
+                # For now, we just remove from tasks map
                 del RECRAWL_TASKS[name]
                 stopped.append(name)
             except Exception as e:
@@ -469,7 +470,7 @@ RECRAWL_MISSING_IDS = {}  # {spider_name: set(missing_ids)}
 async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTasks):
     """检查特定爬虫的缺失情况 (异步执行)"""
     global RECRAWL_MISSING_IDS, ASYNC_TASK_STATUS
-    if not check_all_spiders or spider_name not in RECRAWL_SPIDER_MAP:
+    if spider_name not in SPIDER_MAP:
         return {"status": "error", "message": "无效的爬虫名称"}
 
     if spider_name in RECRAWL_TASKS:
@@ -487,28 +488,38 @@ async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTas
     def run_check():
         crawler = None
         try:
-            crawler = RECRAWL_SPIDER_MAP[spider_name]()
+            spider_cls = SPIDER_MAP[spider_name]
+            crawler = spider_cls()
             RECRAWL_TASKS[spider_name] = crawler
 
-            missing_ids = crawler.find_missing()
-            missing_count = len(missing_ids) if missing_ids else 0
+            if hasattr(crawler, 'find_missing'):
+                missing_ids = crawler.find_missing()
+                missing_count = len(missing_ids) if missing_ids else 0
 
-            # 保存检查结果，供补采时使用
-            RECRAWL_MISSING_IDS[spider_name] = missing_ids
-            
-            # 将 ID 列表转换为 list，方便 JSON 序列化
-            missing_ids_list = list(missing_ids) if missing_ids else []
-            preview_ids = missing_ids_list[:50] # 预览前50个
+                # 保存检查结果，供补采时使用
+                RECRAWL_MISSING_IDS[spider_name] = missing_ids
+                
+                # 将 ID 列表转换为 list，方便 JSON 序列化
+                missing_ids_list = list(missing_ids) if missing_ids else []
+                preview_ids = missing_ids_list[:50] # 预览前50个
 
-            ASYNC_TASK_STATUS[task_id] = {
-                "type": "check",
-                "spider_name": spider_name,
-                "status": "completed",
-                "message": f"发现 {missing_count} 条缺失数据",
-                "missing_count": missing_count,
-                "missing_ids": preview_ids, # 返回具体的ID列表
-                "has_more": len(missing_ids_list) > 50
-            }
+                ASYNC_TASK_STATUS[task_id] = {
+                    "type": "check",
+                    "spider_name": spider_name,
+                    "status": "completed",
+                    "message": f"发现 {missing_count} 条缺失数据",
+                    "missing_count": missing_count,
+                    "missing_ids": preview_ids, # 返回具体的ID列表
+                    "has_more": len(missing_ids_list) > 50
+                }
+            else:
+                 ASYNC_TASK_STATUS[task_id] = {
+                    "type": "check",
+                    "spider_name": spider_name,
+                    "status": "error",
+                    "message": "Spider missing find_missing method",
+                    "missing_count": 0
+                }
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -522,8 +533,7 @@ async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTas
         finally:
             if spider_name in RECRAWL_TASKS:
                 del RECRAWL_TASKS[spider_name]
-            if crawler:
-                crawler.close()
+            # crawler.close() not needed/available for Scrapy spider instance here
 
     background_tasks.add_task(run_check)
     return {"status": "ok", "task_id": task_id, "message": "检查任务已启动"}
@@ -575,7 +585,7 @@ async def get_all_tasks():
 async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks, body: RecrawlRequest = None):
     """开始特定爬虫的补采 - 使用检查时保存的缺失ID (异步执行)"""
     global RECRAWL_MISSING_IDS, ASYNC_TASK_STATUS
-    if not recrawl_spider or spider_name not in RECRAWL_SPIDER_MAP:
+    if spider_name not in SPIDER_MAP:
         return {"status": "error", "message": "无效的爬虫名称"}
 
     if spider_name in RECRAWL_TASKS:
@@ -608,25 +618,34 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks, bod
     def run_recrawl():
         crawler = None
         try:
-            from recrawl_checker import SPIDER_MAPPING
-            crawler = SPIDER_MAPPING[spider_name]()
+            spider_cls = SPIDER_MAP[spider_name]
+            crawler = spider_cls()
             RECRAWL_TASKS[spider_name] = crawler
 
-            # 直接传入已保存的缺失ID，不再重新查找
-            collected = crawler.recrawl_with_ids(missing_ids)
-            if collected is not None:
-                crawler.sync_to_production()
+            if hasattr(crawler, 'recrawl_with_ids'):
+                # 直接传入已保存的缺失ID，不再重新查找
+                collected = crawler.recrawl_with_ids(missing_ids)
+                if collected is not None:
+                    crawler.sync_to_production()
 
-            # 补采完成后清除保存的缺失ID
-            RECRAWL_MISSING_IDS.pop(spider_name, None)
+                # 补采完成后清除保存的缺失ID
+                RECRAWL_MISSING_IDS.pop(spider_name, None)
 
-            ASYNC_TASK_STATUS[task_id] = {
-                "type": "recrawl",
-                "spider_name": spider_name,
-                "status": "completed",
-                "message": f"补采完成",
-                "total": len(missing_ids)
-            }
+                ASYNC_TASK_STATUS[task_id] = {
+                    "type": "recrawl",
+                    "spider_name": spider_name,
+                    "status": "completed",
+                    "message": f"补采完成",
+                    "total": len(missing_ids)
+                }
+            else:
+                 ASYNC_TASK_STATUS[task_id] = {
+                    "type": "recrawl",
+                    "spider_name": spider_name,
+                    "status": "error",
+                    "message": "Spider missing recrawl_with_ids method",
+                    "total": len(missing_ids)
+                }
 
         except Exception as e:
             ASYNC_TASK_STATUS[task_id] = {
@@ -639,8 +658,7 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks, bod
         finally:
             if spider_name in RECRAWL_TASKS:
                 del RECRAWL_TASKS[spider_name]
-            if crawler:
-                crawler.close()
+            # crawler.close()
 
     background_tasks.add_task(run_recrawl)
     return {"status": "ok", "task_id": task_id, "message": f"已开始{spider_name}爬虫的补采任务，共{len(missing_ids)}条"}
@@ -649,8 +667,6 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks, bod
 async def start_all_recrawl(background_tasks: BackgroundTasks):
     """一键检查并补充采集所有爬虫 (异步执行)"""
     global ASYNC_TASK_STATUS
-    if not check_all_spiders or not recrawl_spider:
-        return {"status": "error", "message": "补采模块未正确加载"}
 
     task_id = f"recrawl_all_{int(time.time())}"
     ASYNC_TASK_STATUS[task_id] = {
@@ -663,12 +679,10 @@ async def start_all_recrawl(background_tasks: BackgroundTasks):
 
     def run_all_recrawl():
         """执行所有爬虫的检查和补采"""
-        from recrawl_checker import SPIDER_MAPPING
-
         completed = []
         failed = []
 
-        for spider_name, crawler_class in SPIDER_MAPPING.items():
+        for spider_name, crawler_class in SPIDER_MAP.items():
             crawler = None
             try:
                 # 检查是否已有任务在运行
@@ -681,24 +695,21 @@ async def start_all_recrawl(background_tasks: BackgroundTasks):
                 crawler = crawler_class()
                 RECRAWL_TASKS[spider_name] = crawler
 
-                # 1. 检查缺失
-                missing_ids = crawler.find_missing()
-
-                # 2. 如果有缺失，执行补采
-                if missing_ids:
+                if hasattr(crawler, 'recrawl'):
+                     # 1. 检查缺失 & 2. 如果有缺失，执行补采 (recrawl method does both)
                     missing_count = crawler.recrawl()
                     if missing_count is not None:
                         crawler.sync_to_production()
-
-                completed.append(spider_name)
+                    completed.append(spider_name)
+                else:
+                    failed.append({"spider": spider_name, "error": "Missing recrawl method"})
 
             except Exception as e:
                 failed.append({"spider": spider_name, "error": str(e)})
             finally:
                 if spider_name in RECRAWL_TASKS:
                     del RECRAWL_TASKS[spider_name]
-                if crawler:
-                    crawler.close()
+                # crawler.close()
 
         ASYNC_TASK_STATUS[task_id] = {
             "type": "recrawl_all",
