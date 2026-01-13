@@ -38,8 +38,8 @@ class SpiderLogger:
         log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'log')
         os.makedirs(log_dir, exist_ok=True)
         
-        # 日志文件名：爬虫名_日期.log
-        log_filename = f"{self.spider_name}_{datetime.datetime.now().strftime('%Y%m%d')}.log"
+        # 日志文件名：爬虫名.log (不带日期，方便dashboard读取)
+        log_filename = f"{self.spider_name}.log"
         log_filepath = os.path.join(log_dir, log_filename)
         
         # 创建RotatingFileHandler，限制单个文件大小和备份数量
