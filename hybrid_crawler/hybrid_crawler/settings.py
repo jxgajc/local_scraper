@@ -108,7 +108,7 @@ LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
 
 # 日志保存路径
 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-log_dir = os.path.join(script_dir, 'log')
+log_dir = os.path.join(script_dir, 'logs')
 os.makedirs(log_dir, exist_ok=True)
 
 # 禁用 Scrapy 默认的文件日志，使用我们的自定义日志管理器

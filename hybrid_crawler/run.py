@@ -128,7 +128,7 @@ def run():
     
     # 获取脚本所在目录的绝对路径
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    log_dir = os.path.join(script_dir, 'log')
+    log_dir = os.path.join(script_dir, 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
     # 创建一个CrawlerProcess来运行所有爬虫

@@ -35,7 +35,10 @@ class SpiderLogger:
         logger.addHandler(console_handler)
         
         # 文件handler - 爬虫独立日志
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'log')
+        # project_root/hybrid_crawler/utils/logger_utils.py -> project_root/logs
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        log_dir = os.path.join(project_root, 'logs')
         os.makedirs(log_dir, exist_ok=True)
         
         # 日志文件名：爬虫名.log (不带日期，方便dashboard读取)
