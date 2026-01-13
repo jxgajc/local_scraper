@@ -1,6 +1,7 @@
 import scrapy
 import json
 import uuid
+import time
 import requests
 from urllib.parse import urlencode
 from ..models.hainan_drug import HainanDrugItem
@@ -97,6 +98,7 @@ class HainanDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
         success_count = 0
         for drug_code, base_info in missing_data.items():
+            time.sleep(3)
             try:
                 params = {"current": 1, "size": 20, "drugCode": drug_code}
                 resp = session.get(cls.detail_api_base, params=params, timeout=30)

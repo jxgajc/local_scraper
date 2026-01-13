@@ -83,6 +83,7 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
         from ..models.guangdong_drug import GuangdongDrug
         from datetime import datetime
         import hashlib
+        import time
 
         session = requests.Session()
         session.headers.update({
@@ -133,6 +134,8 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
                 success_count += 1
                 if logger:
                     logger.info(f"补采 drug_code={drug_code} 成功")
+                
+                time.sleep(3)
 
             except Exception as e:
                 if logger:

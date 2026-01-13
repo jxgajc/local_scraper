@@ -117,6 +117,7 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
         success_count = 0
         for med_id, base_info in missing_data.items():
+            time.sleep(3)
             try:
                 hospital_payload = {
                     "verificationCode": cls._get_verification_code(),

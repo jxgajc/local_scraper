@@ -4,6 +4,7 @@ from ..models.liaoning_drug import LiaoningDrugItem
 from ..utils.logger_utils import get_spider_logger
 import json
 import scrapy
+import time
 import pandas as pd
 import uuid
 import requests
@@ -101,6 +102,7 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
 
         success_count = 0
         for goods_code, drug_info in missing_data.items():
+            time.sleep(3)
             try:
                 record = LiaoningDrug(
                     goodscode=goods_code,

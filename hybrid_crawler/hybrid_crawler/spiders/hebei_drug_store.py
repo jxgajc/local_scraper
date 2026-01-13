@@ -88,6 +88,7 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
 
         success_count = 0
         for prod_code, drug_info in missing_data.items():
+            time.sleep(3)
             try:
                 prodentp_code = drug_info.get("prodentpCode")
                 if not prodentp_code:

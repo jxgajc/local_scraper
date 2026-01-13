@@ -3,6 +3,7 @@ from ..models.ningxia_drug import NingxiaDrugItem
 from ..utils.logger_utils import get_spider_logger
 import json
 import scrapy
+import time
 import uuid
 import requests
 from .mixins import SpiderStatusMixin
@@ -89,6 +90,7 @@ class NingxiaDrugSpider(SpiderStatusMixin, BaseRequestSpider):
 
         success_count = 0
         for procure_id, drug_info in missing_data.items():
+            time.sleep(3)
             try:
                 detail_payload = {
                     "procurecatalogId": procure_id,
