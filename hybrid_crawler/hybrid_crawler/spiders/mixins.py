@@ -1,5 +1,6 @@
 import uuid
 import logging
+import asyncio
 
 class SpiderStatusMixin:
     """
@@ -78,26 +79,30 @@ class SpiderStatusMixin:
             return self.logger
         return logging.getLogger(self.name)
 
-    def find_missing(self):
-        """
-        找出缺失的数据
-        委托给 RecrawlManager
-        """
+    async def find_missing_async(self):
+        """异步找出缺失的数据"""
         from ..recrawl.manager import RecrawlManager
-        return RecrawlManager.find_missing(self.name, logger_instance=self.get_logger())
+        return await RecrawlManager.find_missing(self.name)
+
+    async def recrawl_with_ids_async(self, missing_ids):
+        """异步根据 ID 或数据字典进行补采"""
+        from ..recrawl.manager import RecrawlManager
+        return await RecrawlManager.recrawl(self.name, missing_ids)
+
+    async def recrawl_async(self):
+        """异步执行完整的补采流程"""
+        from ..recrawl.manager import RecrawlManager
+        return await RecrawlManager.full_recrawl(self.name)
+
+    # 同步包装方法（用于非异步上下文）
+    def find_missing(self):
+        """同步找出缺失的数据"""
+        return asyncio.get_event_loop().run_until_complete(self.find_missing_async())
 
     def recrawl_with_ids(self, missing_ids):
-        """
-        根据 ID 或数据字典进行补采
-        委托给 RecrawlManager
-        """
-        from ..recrawl.manager import RecrawlManager
-        return RecrawlManager.recrawl(self.name, missing_ids, logger_instance=self.get_logger())
+        """同步根据 ID 或数据字典进行补采"""
+        return asyncio.get_event_loop().run_until_complete(self.recrawl_with_ids_async(missing_ids))
 
     def recrawl(self):
-        """
-        执行完整的补采流程：检查 -> 补采
-        委托给 RecrawlManager
-        """
-        from ..recrawl.manager import RecrawlManager
-        return RecrawlManager.full_recrawl(self.name, logger_instance=self.get_logger())
+        """同步执行完整的补采流程"""
+        return asyncio.get_event_loop().run_until_complete(self.recrawl_async())

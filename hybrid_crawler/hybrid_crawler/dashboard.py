@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import asyncio
 import subprocess
 import signal
 import psutil
@@ -428,7 +429,7 @@ async def check_recrawl_status():
     report = {}
     for name in RecrawlManager.list_spiders():
         try:
-            missing_data = RecrawlManager.find_missing(name)
+            missing_data = await RecrawlManager.find_missing(name)
             report[name] = {
                 "spider_name": name,
                 "missing_count": len(missing_data),
@@ -493,7 +494,7 @@ async def check_single_recrawl(spider_name: str, background_tasks: BackgroundTas
         try:
             RECRAWL_TASKS[spider_name] = True
 
-            missing_ids = RecrawlManager.find_missing(spider_name)
+            missing_ids = asyncio.run(RecrawlManager.find_missing(spider_name))
             missing_count = len(missing_ids) if missing_ids else 0
 
             # 保存检查结果，供补采时使用
@@ -615,7 +616,7 @@ async def start_recrawl(spider_name: str, background_tasks: BackgroundTasks, bod
         try:
             RECRAWL_TASKS[spider_name] = True
 
-            collected = RecrawlManager.recrawl(spider_name, missing_ids)
+            collected = asyncio.run(RecrawlManager.recrawl(spider_name, missing_ids))
 
             # 补采完成后清除保存的缺失ID
             RECRAWL_MISSING_IDS.pop(spider_name, None)
@@ -678,7 +679,7 @@ async def start_all_recrawl(background_tasks: BackgroundTasks):
                 RECRAWL_TASKS[spider_name] = True
 
                 # 执行完整的补采流程
-                count = RecrawlManager.full_recrawl(spider_name)
+                count = asyncio.run(RecrawlManager.full_recrawl(spider_name))
                 completed.append({"spider": spider_name, "count": count})
 
             except Exception as e:

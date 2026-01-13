@@ -1,19 +1,17 @@
 """
 BaseRecrawlAdapter - 补充采集适配器抽象基类
 """
-import time
-import logging
-import requests
+import asyncio
+import aiohttp
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Callable
 from ..models import SessionLocal
-
-logger = logging.getLogger(__name__)
+from ..utils.logger_utils import get_spider_logger
 
 
 class BaseRecrawlAdapter(ABC):
     """
-    补充采集适配器抽象基类
+    补充采集适配器抽象基类（异步版本）
 
     子类需要实现:
     - fetch_all_ids() - 从官网API获取所有ID
@@ -27,31 +25,25 @@ class BaseRecrawlAdapter(ABC):
 
     # 可选配置
     request_delay: float = 3.0  # 请求间隔(秒)
+    default_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json, text/plain, */*',
+    }
 
-    def __init__(self, logger_instance=None, stop_check: Callable = None):
-        self.logger = logger_instance or logger
+    def __init__(self, stop_check: Callable = None):
+        self.logger = get_spider_logger(self.spider_name)
         self.stop_check = stop_check
-        self.session = self._create_session()
-
-    def _create_session(self) -> requests.Session:
-        """创建HTTP会话"""
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/plain, */*',
-        })
-        return session
 
     def _should_stop(self) -> bool:
         """检查是否应该停止"""
         return self.stop_check and self.stop_check()
 
-    def _delay(self):
-        """请求间隔延迟"""
-        time.sleep(self.request_delay)
+    async def _delay(self):
+        """请求间隔延迟（异步）"""
+        await asyncio.sleep(self.request_delay)
 
     @abstractmethod
-    def fetch_all_ids(self) -> Dict[str, Any]:
+    async def fetch_all_ids(self) -> Dict[str, Any]:
         """
         从官网API获取所有ID及其基础信息
 
@@ -61,7 +53,7 @@ class BaseRecrawlAdapter(ABC):
         pass
 
     @abstractmethod
-    def recrawl_by_ids(self, missing_data: Dict[str, Any], db_session) -> int:
+    async def recrawl_by_ids(self, missing_data: Dict[str, Any], db_session) -> int:
         """
         根据缺失数据执行补采
 
@@ -74,7 +66,7 @@ class BaseRecrawlAdapter(ABC):
         """
         pass
 
-    def find_missing(self) -> Dict[str, Any]:
+    async def find_missing(self) -> Dict[str, Any]:
         """
         查找缺失的数据
 
@@ -98,7 +90,7 @@ class BaseRecrawlAdapter(ABC):
 
             # 从API获取所有ID
             self.logger.info(f"[{self.spider_name}] 从官网API获取所有 {self.unique_id}...")
-            api_data = self.fetch_all_ids()
+            api_data = await self.fetch_all_ids()
             self.logger.info(f"[{self.spider_name}] 官网API共有 {len(api_data)} 条记录")
 
             # 计算缺失
@@ -113,7 +105,7 @@ class BaseRecrawlAdapter(ABC):
         finally:
             db.close()
 
-    def recrawl(self, missing_ids=None) -> int:
+    async def recrawl(self, missing_ids=None) -> int:
         """
         执行补充采集
 
@@ -125,11 +117,11 @@ class BaseRecrawlAdapter(ABC):
         """
         # 如果没有指定missing_ids，自动查找
         if missing_ids is None:
-            missing_data = self.find_missing()
+            missing_data = await self.find_missing()
         elif isinstance(missing_ids, (list, set, tuple)):
             # 如果传入的是ID列表，需要重新获取完整信息
             self.logger.info(f"[{self.spider_name}] 收到ID列表，正在获取完整信息...")
-            all_data = self.fetch_all_ids()
+            all_data = await self.fetch_all_ids()
             missing_data = {k: v for k, v in all_data.items() if k in missing_ids}
         else:
             # 假设是字典格式
@@ -141,7 +133,7 @@ class BaseRecrawlAdapter(ABC):
 
         db = SessionLocal()
         try:
-            count = self.recrawl_by_ids(missing_data, db)
+            count = await self.recrawl_by_ids(missing_data, db)
             self.logger.info(f"[{self.spider_name}] 补采完成，成功 {count} 条")
             return count
         except Exception as e:
