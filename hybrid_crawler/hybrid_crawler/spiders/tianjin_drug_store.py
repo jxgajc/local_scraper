@@ -3,6 +3,7 @@ import json
 import random
 import string
 import uuid
+import requests
 from ..models.tianjin_drug import TianjinDrugItem
 from scrapy.http import JsonRequest
 from ..utils.logger_utils import get_spider_logger
@@ -21,10 +22,154 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
     Target: https://tps.ylbz.tj.gov.cn
     """
     name = "tianjin_drug_spider"
-    
+
     # 接口地址
     drug_list_url = "https://tps.ylbz.tj.gov.cn/csb/1.0.0/guideGetMedList"
     hospital_list_url = "https://tps.ylbz.tj.gov.cn/csb/1.0.0/guideGetHosp"
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_hospital_tianjin_test',
+        'unique_id': 'med_id',
+    }
+
+    @staticmethod
+    def _get_verification_code():
+        """生成4位随机字母数字混合验证码"""
+        chars = string.ascii_lowercase + string.digits
+        return ''.join(random.choices(chars, k=4))
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """
+        天津爬虫需要验证码，遍历关键词获取所有数据
+        返回: {med_id: base_info} 字典
+        """
+        api_data = {}
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/json',
+        })
+
+        # 加载关键词
+        try:
+            df_name = pd.read_excel(excel_path)
+            keywords = df_name.loc[:, "采集关键字"].to_list()
+        except Exception as e:
+            if logger:
+                logger.error(f"关键词文件加载失败: {e}")
+            return api_data
+
+        for keyword in keywords:
+            if stop_check and stop_check():
+                break
+            try:
+                payload = {
+                    "verificationCode": cls._get_verification_code(),
+                    "content": keyword
+                }
+                response = session.post(cls.drug_list_url, json=payload, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+
+                if res_json.get("code") != 200:
+                    continue
+
+                data = res_json.get("data", {})
+                drug_list = data.get("list", [])
+
+                for drug in drug_list:
+                    med_id = drug.get('medid')
+                    if med_id:
+                        api_data[med_id] = {
+                            'med_id': med_id,
+                            'gen_name': drug.get('genname'),
+                            'prod_name': drug.get('prodname'),
+                            'dosform': drug.get('dosform'),
+                            'spec': drug.get('spec'),
+                            'pac': drug.get('pac'),
+                            'prod_entp': drug.get('prodentp'),
+                            'source_data': json.dumps(drug, ensure_ascii=False)
+                        }
+
+                if logger:
+                    logger.info(f"天津API关键词[{keyword}]获取{len(drug_list)}条")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"请求天津API失败: {e}")
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """根据缺失的 med_id 及其基础信息调用医院API进行补采"""
+        from ..models.tianjin_drug import TianjinDrug
+        from datetime import datetime
+        import hashlib
+
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/json',
+        })
+
+        success_count = 0
+        for med_id, base_info in missing_data.items():
+            try:
+                hospital_payload = {
+                    "verificationCode": cls._get_verification_code(),
+                    "genname": base_info.get('gen_name'),
+                    "dosform": base_info.get('dosform'),
+                    "spec": base_info.get('spec'),
+                    "pac": base_info.get('pac')
+                }
+
+                resp = session.post(cls.hospital_list_url, json=hospital_payload, timeout=30)
+                resp.raise_for_status()
+                res_json = resp.json()
+
+                if res_json.get("code") != 200:
+                    continue
+
+                data = res_json.get("data", {})
+                hosp_list = data.get("list", [])
+
+                if hosp_list:
+                    for hosp in hosp_list:
+                        record = TianjinDrug(
+                            **base_info,
+                            has_hospital_record=True,
+                            hs_name=hosp.get('hsname'),
+                            hs_lav=hosp.get('hslav'),
+                            got_time=hosp.get('gottime'),
+                            collect_time=datetime.now()
+                        )
+                        field_values = {'med_id': med_id, 'hs_name': hosp.get('hsname')}
+                        record.md5_id = hashlib.md5(
+                            json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
+                        ).hexdigest()
+                        db_session.add(record)
+                else:
+                    record = TianjinDrug(
+                        **base_info,
+                        has_hospital_record=False,
+                        collect_time=datetime.now()
+                    )
+                    record.md5_id = hashlib.md5(med_id.encode()).hexdigest()
+                    db_session.add(record)
+
+                success_count += 1
+                if logger:
+                    logger.info(f"补采 med_id={med_id} 成功")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 med_id={med_id} 失败: {e}")
+
+        db_session.commit()
+        return success_count
     
     def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -1,6 +1,7 @@
 import scrapy
 import json
 import uuid
+import requests
 from urllib.parse import urlencode
 from ..models.hainan_drug import HainanDrugItem
 from ..utils.logger_utils import get_spider_logger
@@ -19,10 +20,127 @@ class HainanDrugSpider(SpiderStatusMixin, scrapy.Spider):
     Target: https://ybj.hainan.gov.cn
     """
     name = "hainan_drug_spider"
-    
+
     # API Endpoints
     list_api_base = "https://ybj.hainan.gov.cn/tps-local/local/web/std/drugStore/getDrugStore"
     detail_api_base = "https://ybj.hainan.gov.cn/tps-local/local/web/std/drugStore/getDrugStoreDetl"
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_shop_hainan_test',
+        'unique_id': 'drug_code',
+    }
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """从官网 API 获取所有 drug_code 及其基础信息"""
+        api_data = {}
+        current = 1
+        page_size = 500
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+        })
+
+        while True:
+            if stop_check and stop_check():
+                break
+            try:
+                params = {"current": current, "size": page_size, "prodName": ""}
+                response = session.get(cls.list_api_base, params=params, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+
+                data_block = res_json.get("data", {})
+                records = data_block.get("records", [])
+                total_pages = data_block.get("pages", 0)
+
+                for record in records:
+                    drug_code = record.get('prodCode')
+                    if drug_code:
+                        api_data[drug_code] = {
+                            'drug_code': drug_code,
+                            'prod_name': record.get('prodName'),
+                            'dosform': record.get('dosform'),
+                            'spec': record.get('prodSpec'),
+                            'pac': record.get('prodPac'),
+                            'prod_entp': record.get('prodentpName'),
+                            'source_data': json.dumps(record, ensure_ascii=False)
+                        }
+
+                if logger:
+                    logger.info(f"海南API第{current}/{total_pages}页，获取{len(records)}条")
+
+                if current >= total_pages:
+                    break
+                current += 1
+            except Exception as e:
+                if logger:
+                    logger.error(f"请求海南API失败: {e}")
+                break
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """根据缺失的 drug_code 及其基础信息直接调用详情API进行补采"""
+        from ..models.hainan_drug import HainanDrug
+        from datetime import datetime
+        import hashlib
+
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+        })
+
+        success_count = 0
+        for drug_code, base_info in missing_data.items():
+            try:
+                params = {"current": 1, "size": 20, "drugCode": drug_code}
+                resp = session.get(cls.detail_api_base, params=params, timeout=30)
+                resp.raise_for_status()
+                res_json = resp.json()
+
+                data = res_json.get("data", {})
+                shops = data.get("records", [])
+
+                if shops:
+                    for shop in shops:
+                        record = HainanDrug(
+                            **base_info,
+                            has_shop_record=True,
+                            shop_name=shop.get('medinsName'),
+                            shop_code=shop.get('medinsCode'),
+                            price=shop.get('pric'),
+                            inventory=shop.get('invCnt'),
+                            collect_time=datetime.now()
+                        )
+                        field_values = {'drug_code': drug_code, 'shop_code': shop.get('medinsCode')}
+                        record.md5_id = hashlib.md5(
+                            json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
+                        ).hexdigest()
+                        db_session.add(record)
+                else:
+                    record = HainanDrug(
+                        **base_info,
+                        has_shop_record=False,
+                        collect_time=datetime.now()
+                    )
+                    record.md5_id = hashlib.md5(drug_code.encode()).hexdigest()
+                    db_session.add(record)
+
+                success_count += 1
+                if logger:
+                    logger.info(f"补采 drug_code={drug_code} 成功")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 drug_code={drug_code} 失败: {e}")
+
+        db_session.commit()
+        return success_count
     
     def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -1,6 +1,7 @@
 import scrapy
 import json
 import uuid
+import requests
 from ..models.fujian_drug import FujianDrugItem
 from scrapy.http import JsonRequest
 from ..utils.logger_utils import get_spider_logger
@@ -16,6 +17,155 @@ class FujianDrugSpider(SpiderStatusMixin, scrapy.Spider):
     # API Endpoints
     list_api_url = "https://open.ybj.fujian.gov.cn:10013/tps-local/web/tender/plus/item-cfg-info/list"
     hospital_api_url = "https://open.ybj.fujian.gov.cn:10013/tps-local/web/trans/api/open/v2/queryHospital"
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_hospital_fujian_test',
+        'unique_id': 'ext_code',
+    }
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """
+        从官网 API 获取所有 ext_code 及其基础信息
+        返回: {ext_code: base_info} 字典
+        """
+        api_data = {}  # {ext_code: base_info}
+        current = 1
+        page_size = 1000
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+        })
+
+        while True:
+            if stop_check and stop_check():
+                break
+            try:
+                payload = {
+                    "druglistName": "", "druglistCode": "", "drugName": "",
+                    "ruteName": "", "dosformName": "", "specName": "",
+                    "pac": "", "prodentpName": "", "current": current,
+                    "size": page_size, "tenditmType": ""
+                }
+                response = session.post(cls.list_api_url, json=payload, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+
+                if res_json.get("code") != 0:
+                    break
+
+                data_block = res_json.get("data", {})
+                records = data_block.get("records", [])
+                total_pages = data_block.get("pages", 0)
+
+                for record in records:
+                    ext_code = record.get('extCode')
+                    if ext_code:
+                        api_data[ext_code] = {
+                            'ext_code': ext_code,
+                            'drug_list_code': record.get('druglistCode'),
+                            'drug_name': record.get('drugName'),
+                            'drug_list_name': record.get('druglistName'),
+                            'dosform': record.get('dosformName'),
+                            'spec': record.get('specName'),
+                            'pac': record.get('pac'),
+                            'rute_name': record.get('ruteName'),
+                            'prod_entp': record.get('prodentpName'),
+                            'source_data': json.dumps(record, ensure_ascii=False)
+                        }
+
+                if logger:
+                    logger.info(f"福建API第{current}/{total_pages}页，获取{len(records)}条")
+
+                if current >= total_pages:
+                    break
+                current += 1
+            except Exception as e:
+                if logger:
+                    logger.error(f"请求福建API失败: {e}")
+                break
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """
+        根据缺失的 ext_code 及其基础信息直接调用详情API进行补采
+
+        Args:
+            missing_data: {ext_code: base_info} 字典，包含缺失记录的基础信息
+            db_session: 数据库会话
+            logger: 日志记录器
+        """
+        from ..models.fujian_drug import FujianDrug
+        from datetime import datetime
+        import hashlib
+
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json;charset=utf-8',
+        })
+
+        success_count = 0
+        for ext_code, base_info in missing_data.items():
+            try:
+                hospital_payload = {
+                    "area": "", "hospitalName": "", "pageNo": 1,
+                    "pageSize": 100, "productId": ext_code, "tenditmType": ""
+                }
+
+                resp = session.post(cls.hospital_api_url, json=hospital_payload, timeout=30)
+                resp.raise_for_status()
+                res_json = resp.json()
+
+                inner_data_str = res_json.get("data")
+                if inner_data_str and isinstance(inner_data_str, str):
+                    inner_json = json.loads(inner_data_str)
+                    hospitals = inner_json.get("data", [])
+
+                    if hospitals:
+                        for hosp in hospitals:
+                            record = FujianDrug(
+                                **base_info,
+                                has_hospital_record=True,
+                                hospital_name=hosp.get('hospitalName'),
+                                medins_code=hosp.get('medinsCode'),
+                                area_name=hosp.get('areaName'),
+                                area_code=hosp.get('areaCode'),
+                                collect_time=datetime.now()
+                            )
+                            field_values = {
+                                'ext_code': ext_code,
+                                'hospital_name': hosp.get('hospitalName'),
+                                'medins_code': hosp.get('medinsCode'),
+                            }
+                            record.md5_id = hashlib.md5(
+                                json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
+                            ).hexdigest()
+                            db_session.add(record)
+                    else:
+                        record = FujianDrug(
+                            **base_info,
+                            has_hospital_record=False,
+                            collect_time=datetime.now()
+                        )
+                        record.md5_id = hashlib.md5(ext_code.encode()).hexdigest()
+                        db_session.add(record)
+
+                success_count += 1
+                if logger:
+                    logger.info(f"补采 ext_code={ext_code} 成功")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 ext_code={ext_code} 失败: {e}")
+
+        db_session.commit()
+        return success_count
 
     def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)

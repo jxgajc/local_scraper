@@ -4,22 +4,139 @@ from ..utils.logger_utils import get_spider_logger
 import json
 import scrapy
 import uuid
+import requests
 from .mixins import SpiderStatusMixin
 
 class NingxiaDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     """
     宁夏医保局药品及采购医院爬虫
-    流程: 
+    流程:
     1. 请求药品列表 (getRecentPurchaseDetailData.html) -> 支持翻页
     2. 获取 procurecatalogId
     3. 请求医院明细 (getDrugDetailDate.html) -> 支持翻页
     """
     name = "ningxia_drug_store"
-    
+
     # 药品列表接口
-    list_api_url = "https://nxyp.ylbz.nx.gov.cn/cms/recentPurchaseDetail/getRecentPurchaseDetailData.html" 
+    list_api_url = "https://nxyp.ylbz.nx.gov.cn/cms/recentPurchaseDetail/getRecentPurchaseDetailData.html"
     # 医院明细接口
     hospital_api_url = "https://nxyp.ylbz.nx.gov.cn/cms/recentPurchaseDetail/getDrugDetailDate.html"
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_hospital_ningxia_test',
+        'unique_id': 'procurecatalogId',
+    }
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """从官网 API 获取所有 procurecatalogId 及其基础信息"""
+        api_data = {}
+        current = 1
+        page_size = 100
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        })
+
+        while True:
+            if stop_check and stop_check():
+                break
+            try:
+                form_data = {
+                    "_search": "false", "page": str(current),
+                    "rows": str(page_size), "sidx": "", "sord": "asc"
+                }
+                response = session.post(cls.list_api_url, data=form_data, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+
+                total_pages = int(res_json.get("total", 0))
+                current_page = int(res_json.get("page", 1))
+                rows = res_json.get("rows", [])
+
+                for record in rows:
+                    procure_id = str(record.get('procurecatalogId', ''))
+                    if procure_id:
+                        api_data[procure_id] = record  # 保存完整记录作为 base_info
+
+                if logger:
+                    logger.info(f"宁夏API第{current_page}/{total_pages}页，获取{len(rows)}条")
+
+                if current_page >= total_pages:
+                    break
+                current += 1
+            except Exception as e:
+                if logger:
+                    logger.error(f"请求宁夏API失败: {e}")
+                break
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """根据缺失的 procurecatalogId 及其基础信息直接调用详情API进行补采"""
+        from ..models.ningxia_drug import NingxiaDrug
+        from datetime import datetime
+        import hashlib
+
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        })
+
+        success_count = 0
+        for procure_id, drug_info in missing_data.items():
+            try:
+                detail_payload = {
+                    "procurecatalogId": procure_id,
+                    "_search": "false", "rows": "100", "page": "1", "sidx": "", "sord": "asc"
+                }
+
+                resp = session.post(cls.hospital_api_url, data=detail_payload, timeout=30)
+                resp.raise_for_status()
+                res_json = resp.json()
+
+                hospitals = res_json.get("rows", [])
+
+                if hospitals:
+                    for hosp in hospitals:
+                        record = NingxiaDrug(
+                            procurecatalogId=procure_id,
+                            productName=drug_info.get('productName'),
+                            dosformName=drug_info.get('dosformName'),
+                            specName=drug_info.get('specName'),
+                            prodentpName=drug_info.get('prodentpName'),
+                            hospitalName=hosp.get('hospitalName'),
+                            areaName=hosp.get('areaName'),
+                            collect_time=datetime.now()
+                        )
+                        field_values = {'procurecatalogId': procure_id, 'hospitalName': hosp.get('hospitalName')}
+                        record.md5_id = hashlib.md5(
+                            json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
+                        ).hexdigest()
+                        db_session.add(record)
+                else:
+                    record = NingxiaDrug(
+                        procurecatalogId=procure_id,
+                        productName=drug_info.get('productName'),
+                        collect_time=datetime.now()
+                    )
+                    record.md5_id = hashlib.md5(procure_id.encode()).hexdigest()
+                    db_session.add(record)
+
+                success_count += 1
+                if logger:
+                    logger.info(f"补采 procurecatalogId={procure_id} 成功")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 procurecatalogId={procure_id} 失败: {e}")
+
+        db_session.commit()
+        return success_count
 
     def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)

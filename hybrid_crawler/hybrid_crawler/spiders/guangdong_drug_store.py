@@ -1,6 +1,7 @@
 import scrapy
 import json
 import uuid
+import requests
 from ..models.guangdong_drug import GuangdongDrugItem
 from scrapy.http import JsonRequest
 from ..utils.logger_utils import get_spider_logger
@@ -12,10 +13,133 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
     Target: https://igi.hsa.gd.gov.cn
     """
     name = "guangdong_drug_spider"
-    
+
     # API Endpoints
     list_api_url = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/queryPubonlnPage"
     hospital_api_url = "https://igi.hsa.gd.gov.cn/tps_local_bd/web/publicity/pubonlnPublicity/getPurcHospitalInfoListNew"
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_hospital_guangdong_test',
+        'unique_id': 'drug_code',
+    }
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """从官网 API 获取所有 drug_code 及其基础信息"""
+        api_data = {}
+        current = 1
+        page_size = 500
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+        })
+
+        while True:
+            if stop_check and stop_check():
+                break
+            try:
+                payload = {"current": current, "size": page_size, "searchCount": True}
+                response = session.post(cls.list_api_url, json=payload, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+
+                data_block = res_json.get("data", {})
+                records = data_block.get("records", [])
+                total_pages = data_block.get("pages", 0)
+
+                for record in records:
+                    drug_code = record.get('drugCode')
+                    if drug_code:
+                        api_data[drug_code] = {
+                            'drug_id': record.get('drugId'),
+                            'drug_code': drug_code,
+                            'gen_name': record.get('genname'),
+                            'trade_name': record.get('tradeName'),
+                            'dosform_name': record.get('dosformName'),
+                            'spec_name': record.get('specName'),
+                            'prod_entp_name': record.get('prodentpName'),
+                            'price': record.get('minPacPubonlnPric'),
+                            'source_data': json.dumps(record, ensure_ascii=False)
+                        }
+
+                if logger:
+                    logger.info(f"广东API第{current}/{total_pages}页，获取{len(records)}条")
+
+                if current >= total_pages:
+                    break
+                current += 1
+            except Exception as e:
+                if logger:
+                    logger.error(f"请求广东API失败: {e}")
+                break
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """根据缺失的 drug_code 及其基础信息直接调用详情API进行补采"""
+        from ..models.guangdong_drug import GuangdongDrug
+        from datetime import datetime
+        import hashlib
+
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json',
+        })
+
+        success_count = 0
+        for drug_code, base_info in missing_data.items():
+            try:
+                hospital_payload = {
+                    "current": 1, "size": 50, "searchCount": True, "drugCode": drug_code
+                }
+
+                resp = session.post(cls.hospital_api_url, json=hospital_payload, timeout=30)
+                resp.raise_for_status()
+                res_json = resp.json()
+
+                data = res_json.get("data", {})
+                hospitals = data.get("records", [])
+
+                if hospitals:
+                    for hosp in hospitals:
+                        record = GuangdongDrug(
+                            **base_info,
+                            has_hospital_record=True,
+                            medins_code=hosp.get('medinsCode'),
+                            medins_name=hosp.get('medinsName'),
+                            hosp_type=hosp.get('type'),
+                            admdvs_name=hosp.get('admdvsName'),
+                            collect_time=datetime.now()
+                        )
+                        field_values = {'drug_code': drug_code, 'medins_code': hosp.get('medinsCode')}
+                        record.md5_id = hashlib.md5(
+                            json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
+                        ).hexdigest()
+                        db_session.add(record)
+                else:
+                    record = GuangdongDrug(
+                        **base_info,
+                        has_hospital_record=False,
+                        collect_time=datetime.now()
+                    )
+                    record.md5_id = hashlib.md5(drug_code.encode()).hexdigest()
+                    db_session.add(record)
+
+                success_count += 1
+                if logger:
+                    logger.info(f"补采 drug_code={drug_code} 成功")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 drug_code={drug_code} 失败: {e}")
+
+        db_session.commit()
+        return success_count
     
     def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)

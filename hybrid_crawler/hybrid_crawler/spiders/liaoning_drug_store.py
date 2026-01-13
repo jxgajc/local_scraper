@@ -6,6 +6,7 @@ import json
 import scrapy
 import pandas as pd
 import uuid
+import requests
 from scrapy.http import JsonRequest, FormRequest
 import os
 from .mixins import SpiderStatusMixin
@@ -22,9 +23,104 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     API: http://ggzy.ln.gov.cn/yphc/gzcx/
     """
     name = "liaoning_drug_store"
-    
+
     # 药品列表API URL
-    list_api_url = "https://ggzy.ln.gov.cn/medical" 
+    list_api_url = "https://ggzy.ln.gov.cn/medical"
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_hospital_liaoning_test',
+        'unique_id': 'goodscode',
+    }
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """
+        辽宁爬虫是基于关键词的，需要遍历关键词获取所有数据
+        返回: {goodscode: base_info} 字典
+        """
+        api_data = {}
+        session = requests.Session()
+
+        # 加载关键词
+        try:
+            df_name = pd.read_excel(excel_path)
+            keywords = df_name.loc[:, "采集关键字"].to_list()
+        except Exception as e:
+            if logger:
+                logger.error(f"关键词文件加载失败: {e}")
+            return api_data
+
+        for keyword in keywords:
+            if stop_check and stop_check():
+                break
+
+            page_num = 1
+            while True:
+                if stop_check and stop_check():
+                    break
+                try:
+                    form_data = {
+                        "apiName": "GetYPYYCG",
+                        "product": keyword,
+                        "company": "",
+                        "pageNum": str(page_num)
+                    }
+                    response = session.post(cls.list_api_url, data=form_data, timeout=30)
+                    response.raise_for_status()
+                    res_json = response.json()
+
+                    data_block = res_json.get("data", {})
+                    rows = data_block.get("data", [])
+                    total_pages = int(data_block.get("totalPage", 0))
+
+                    for record in rows:
+                        goods_code = record.get('goodscode')
+                        if goods_code:
+                            api_data[goods_code] = record
+
+                    if logger:
+                        logger.info(f"辽宁API关键词[{keyword}]第{page_num}/{total_pages}页，获取{len(rows)}条")
+
+                    if page_num >= total_pages:
+                        break
+                    page_num += 1
+                except Exception as e:
+                    if logger:
+                        logger.error(f"请求辽宁API失败: {e}")
+                    break
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """辽宁爬虫补采 - 直接保存缺失的数据"""
+        from ..models.liaoning_drug import LiaoningDrug
+        from datetime import datetime
+        import hashlib
+
+        success_count = 0
+        for goods_code, drug_info in missing_data.items():
+            try:
+                record = LiaoningDrug(
+                    goodscode=goods_code,
+                    ProductName=drug_info.get('ProductName'),
+                    Spec=drug_info.get('Spec'),
+                    Manufacturer=drug_info.get('Manufacturer'),
+                    collect_time=datetime.now()
+                )
+                record.md5_id = hashlib.md5(goods_code.encode()).hexdigest()
+                db_session.add(record)
+                success_count += 1
+
+                if logger:
+                    logger.info(f"补采 goodscode={goods_code} 成功")
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 goodscode={goods_code} 失败: {e}")
+
+        db_session.commit()
+        return success_count 
 
     def __init__(self, recrawl_ids=None, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -6,6 +6,7 @@ import json
 import scrapy
 import time
 import uuid
+import requests
 from .mixins import SpiderStatusMixin
 
 # http://ylbzj.hebei.gov.cn/category/162
@@ -15,11 +16,115 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     目标: 先获取药品列表，再根据 prodCode 获取采购该药品的医院信息
     """
     name = "hebei_drug_spider"
-    
+
     # API Endpoints
-    list_api_url = "https://ylbzj.hebei.gov.cn/templates/default_pc/syyypqxjzcg/queryPubonlnDrudInfoList" 
+    list_api_url = "https://ylbzj.hebei.gov.cn/templates/default_pc/syyypqxjzcg/queryPubonlnDrudInfoList"
     hospital_api_url = "https://ylbzj.hebei.gov.cn/templates/default_pc/syyypqxjzcg/queryProcurementMedinsList"
-    
+
+    # 补采配置
+    recrawl_config = {
+        'table_name': 'drug_hospital_hebei_test',
+        'unique_id': 'prodCode',
+    }
+
+    @classmethod
+    def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
+        """从官网 API 获取所有 prodCode 及其基础信息"""
+        api_data = {}
+        current = 1
+        page_size = 1000
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'prodType': '2'
+        })
+
+        while True:
+            if stop_check and stop_check():
+                break
+            try:
+                params = {"pageNo": current, "pageSize": page_size, "prodName": "", "prodentpName": ""}
+                response = session.get(cls.list_api_url, params=params, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+
+                data_block = res_json.get("data", {})
+                records = data_block.get("list", [])
+                total_pages = int(data_block.get("pages", 0))
+                current_page = int(data_block.get("pageNo", 1))
+
+                for record in records:
+                    prod_code = record.get('prodCode')
+                    if prod_code:
+                        api_data[prod_code] = record  # 保存完整记录作为 base_info
+
+                if logger:
+                    logger.info(f"河北API第{current_page}/{total_pages}页，获取{len(records)}条")
+
+                if current_page >= total_pages:
+                    break
+                current += 1
+            except Exception as e:
+                if logger:
+                    logger.error(f"请求河北API失败: {e}")
+                break
+
+        return api_data
+
+    @classmethod
+    def recrawl_by_ids(cls, missing_data, db_session, logger=None):
+        """根据缺失的 prodCode 及其基础信息直接调用详情API进行补采"""
+        from ..models.hebei_drug import HebeiDrug
+        from datetime import datetime
+        import hashlib
+
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'prodType': '2'
+        })
+
+        success_count = 0
+        for prod_code, drug_info in missing_data.items():
+            try:
+                prodentp_code = drug_info.get("prodentpCode")
+                if not prodentp_code:
+                    continue
+
+                params = {
+                    "pageNo": 1, "pageSize": 1000,
+                    "prodCode": prod_code, "prodEntpCode": prodentp_code, "isPublicHospitals": ""
+                }
+                resp = session.get(cls.hospital_api_url, params=params, timeout=30)
+                resp.raise_for_status()
+                res_json = resp.json()
+
+                hospital_list = res_json.get("list", []) or []
+
+                record = HebeiDrug(
+                    prodCode=prod_code,
+                    prodName=drug_info.get('prodName'),
+                    prodentpName=drug_info.get('prodentpName'),
+                    prodentpCode=prodentp_code,
+                    hospital_purchases=hospital_list,
+                    collect_time=datetime.now()
+                )
+                record.md5_id = hashlib.md5(prod_code.encode()).hexdigest()
+                db_session.add(record)
+
+                success_count += 1
+                if logger:
+                    logger.info(f"补采 prodCode={prod_code} 成功，医院数: {len(hospital_list)}")
+
+            except Exception as e:
+                if logger:
+                    logger.error(f"补采 prodCode={prod_code} 失败: {e}")
+
+        db_session.commit()
+        return success_count
+
     # 存储cookie
     cookies = {}
     
