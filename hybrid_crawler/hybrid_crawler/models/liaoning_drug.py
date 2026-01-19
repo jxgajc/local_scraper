@@ -1,12 +1,13 @@
 from sqlalchemy import Column, String, Text, Integer, JSON, DateTime
 from . import BaseModel
+from .mixins import BizFingerprintMixin
 import scrapy
 import hashlib
 import json
 from datetime import datetime
 
 
-class LiaoningDrugItem(scrapy.Item):
+class LiaoningDrugItem(BizFingerprintMixin, scrapy.Item):
     """
     辽宁药店数据Item
     """
@@ -33,27 +34,15 @@ class LiaoningDrugItem(scrapy.Item):
     
     def generate_md5_id(self):
         """
-        根据所有字段生成MD5唯一标识
+        根据业务字段生成MD5唯一标识
         """
-        # 获取所有字段值
-        field_values = {}
-        for field in self.fields:
-            if field != 'md5_id' and field != 'collect_time':  # 排除MD5 ID和采集时间本身
-                field_values[field] = self.get(field, '')
+        # 调用 Mixin 中的通用方法
+        self.generate_biz_id()
         
-        # 将字段值转换为JSON字符串，排序键以确保一致性
-        sorted_json = json.dumps(field_values, sort_keys=True, ensure_ascii=False)
-        
-        # 计算MD5哈希值
-        md5_hash = hashlib.md5(sorted_json.encode('utf-8')).hexdigest()
-        
-        # 设置MD5 ID字段
-        self['md5_id'] = md5_hash
-        
-        # 设置采集时间
+        # 设置采集时间 (保持原有逻辑)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        return md5_hash
+        return self['md5_id']
 
     def get_model_class(self):
         return LiaoningDrug

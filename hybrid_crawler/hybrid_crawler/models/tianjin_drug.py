@@ -2,9 +2,10 @@ import scrapy
 import hashlib
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, Boolean
-from . import BaseModel  # 假设您有这个基础类，如果没有可以使用 sqlalchemy.ext.declarative.declarative_base()
+from . import BaseModel
+from .mixins import BizFingerprintMixin
 
-class TianjinDrugItem(scrapy.Item):
+class TianjinDrugItem(BizFingerprintMixin, scrapy.Item):
     """
     天津市药品数据 Item
     对应接口: guideGetMedList (药品列表) + guideGetHosp (医院列表)
@@ -42,10 +43,17 @@ class TianjinDrugItem(scrapy.Item):
 
     def generate_md5_id(self):
         """
-        生成规则: 药品ID + 医院名称 (如果存在)
+        生成规则: 使用统一业务指纹
         """
-        sign_str = f"{self.get('med_id')}|{self.get('hs_name')}"
-        self['md5_id'] = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
+        mapping = {
+            'HospitalName': 'hs_name',
+            'ProductName': 'gen_name',
+            'MedicineModelName': 'dosform',
+            'Outlookc': 'spec',
+            'Pack': 'pac',
+            'Manufacturer': 'prod_entp'
+        }
+        self.generate_biz_id(field_mapping=mapping)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     def get_model_class(self):

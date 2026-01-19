@@ -38,11 +38,18 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
 
     def _load_keywords(self):
         """加载关键词列表"""
+        from scrapy.utils.project import get_project_settings
+        settings = get_project_settings()
+        path = settings.get('KEYWORD_FILE_PATH', '关键字采集(2).xlsx')
+        if not os.path.isabs(path):
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            path = os.path.join(base_dir, path)
+            
         try:
-            df = pd.read_excel(excel_path)
+            df = pd.read_excel(path)
             return df.loc[:, "采集关键字"].to_list()
         except Exception as e:
-            self.logger.error(f"[{self.spider_name}] 关键词文件加载失败: {e}")
+            self.logger.error(f"[{self.spider_name}] 关键词文件加载失败: {e} (Path: {path})")
             return []
 
     async def fetch_all_ids(self) -> Dict[str, Any]:
@@ -98,7 +105,7 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
 
     async def recrawl_by_ids(self, missing_data: Dict[str, Any], db_session) -> int:
         """根据缺失的 med_id 调用医院API进行补采"""
-        from ...models.tianjin_drug import TianjinDrug
+        from ...models.tianjin_drug import TianjinDrug, TianjinDrugItem
 
         success_count = 0
         headers = {**self.default_headers, 'Content-Type': 'application/json'}
@@ -126,6 +133,15 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
 
                     if hosp_list:
                         for hosp in hosp_list:
+                            # 构造Item以生成MD5
+                            item = TianjinDrugItem()
+                            item.update(base_info)
+                            item['has_hospital_record'] = True
+                            item['hs_name'] = hosp.get('hsname')
+                            item['hs_lav'] = hosp.get('hslav')
+                            item['got_time'] = hosp.get('gottime')
+                            item.generate_md5_id()
+                            
                             record = TianjinDrug(
                                 med_id=base_info.get('med_id'),
                                 gen_name=base_info.get('gen_name'),
@@ -139,14 +155,16 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
                                 hs_name=hosp.get('hsname'),
                                 hs_lav=hosp.get('hslav'),
                                 got_time=hosp.get('gottime'),
-                                collect_time=datetime.now()
+                                collect_time=datetime.now(),
+                                md5_id=item['md5_id']
                             )
-                            field_values = {'med_id': med_id, 'hs_name': hosp.get('hsname')}
-                            record.md5_id = hashlib.md5(
-                                json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
-                            ).hexdigest()
                             db_session.add(record)
                     else:
+                        item = TianjinDrugItem()
+                        item.update(base_info)
+                        item['has_hospital_record'] = False
+                        item.generate_md5_id()
+                        
                         record = TianjinDrug(
                             med_id=base_info.get('med_id'),
                             gen_name=base_info.get('gen_name'),
@@ -157,9 +175,9 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
                             prod_entp=base_info.get('prod_entp'),
                             source_data=base_info.get('source_data'),
                             has_hospital_record=False,
-                            collect_time=datetime.now()
+                            collect_time=datetime.now(),
+                            md5_id=item['md5_id']
                         )
-                        record.md5_id = hashlib.md5(med_id.encode()).hexdigest()
                         db_session.add(record)
 
                     success_count += 1

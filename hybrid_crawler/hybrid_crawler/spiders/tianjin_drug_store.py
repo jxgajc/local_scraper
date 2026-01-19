@@ -10,11 +10,7 @@ from ..utils.logger_utils import get_spider_logger
 import pandas as pd
 import os
 from .mixins import SpiderStatusMixin
-
-# 获取脚本所在目录的绝对路径
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# 构建Excel文件的绝对路径
-excel_path = os.path.join(script_dir, "../../关键字采集(2).xlsx")
+from scrapy.utils.project import get_project_settings
 
 class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
     """
@@ -36,8 +32,18 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
     @staticmethod
     def _get_verification_code():
         """生成4位随机字母数字混合验证码"""
+        # TODO: 如果目标站点开启了真实验证码校验，此处需接入打码平台或OCR服务
         chars = string.ascii_lowercase + string.digits
         return ''.join(random.choices(chars, k=4))
+
+    @classmethod
+    def _get_excel_path(cls):
+        settings = get_project_settings()
+        path = settings.get('KEYWORD_FILE_PATH', '关键字采集(2).xlsx')
+        if not os.path.isabs(path):
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            path = os.path.join(base_dir, path)
+        return path
 
     @classmethod
     def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
@@ -52,13 +58,14 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
             'Content-Type': 'application/json',
         })
 
+        excel_path = cls._get_excel_path()
         # 加载关键词
         try:
             df_name = pd.read_excel(excel_path)
             keywords = df_name.loc[:, "采集关键字"].to_list()
         except Exception as e:
             if logger:
-                logger.error(f"关键词文件加载失败: {e}")
+                logger.error(f"关键词文件加载失败: {e} (Path: {excel_path})")
             return api_data
 
         for keyword in keywords:
@@ -105,7 +112,7 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
     @classmethod
     def recrawl_by_ids(cls, missing_data, db_session, logger=None):
         """根据缺失的 med_id 及其基础信息调用医院API进行补采"""
-        from ..models.tianjin_drug import TianjinDrug
+        from ..models.tianjin_drug import TianjinDrug, TianjinDrugItem
         from datetime import datetime
         import hashlib
 
@@ -139,26 +146,37 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
                 if hosp_list:
                     for hosp in hosp_list:
+                        # 使用 Item 计算 MD5
+                        item = TianjinDrugItem()
+                        item.update(base_info)
+                        item['has_hospital_record'] = True
+                        item['hs_name'] = hosp.get('hsname')
+                        item['hs_lav'] = hosp.get('hslav')
+                        item['got_time'] = hosp.get('gottime')
+                        item.generate_md5_id()
+
                         record = TianjinDrug(
                             **base_info,
                             has_hospital_record=True,
                             hs_name=hosp.get('hsname'),
                             hs_lav=hosp.get('hslav'),
                             got_time=hosp.get('gottime'),
-                            collect_time=datetime.now()
+                            collect_time=datetime.now(),
+                            md5_id=item['md5_id']
                         )
-                        field_values = {'med_id': med_id, 'hs_name': hosp.get('hsname')}
-                        record.md5_id = hashlib.md5(
-                            json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
-                        ).hexdigest()
                         db_session.add(record)
                 else:
+                    item = TianjinDrugItem()
+                    item.update(base_info)
+                    item['has_hospital_record'] = False
+                    item.generate_md5_id()
+
                     record = TianjinDrug(
                         **base_info,
                         has_hospital_record=False,
-                        collect_time=datetime.now()
+                        collect_time=datetime.now(),
+                        md5_id=item['md5_id']
                     )
-                    record.md5_id = hashlib.md5(med_id.encode()).hexdigest()
                     db_session.add(record)
 
                 success_count += 1
@@ -182,13 +200,14 @@ class TianjinDrugSpider(SpiderStatusMixin, scrapy.Spider):
         self.recrawl_mode = self.recrawl_ids is not None
 
         # 加载关键词
+        excel_path = self._get_excel_path()
         try:
             df_name = pd.read_excel(excel_path)
             self.search_contents = df_name.loc[:, "采集关键字"].to_list()
             mode_str = f"补采模式，目标 {len(self.recrawl_ids)} 条" if self.recrawl_mode else "全量采集"
             self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，模式: {mode_str}，加载关键词: {len(self.search_contents)} 个")
         except Exception as e:
-            self.spider_log.error(f"❌ 关键词文件加载失败: {e}")
+            self.spider_log.error(f"❌ 关键词文件加载失败: {e} (Path: {excel_path})")
             self.search_contents = []
 
     custom_settings = {

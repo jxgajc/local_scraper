@@ -27,28 +27,37 @@ class DataCleaningPipeline:
 class UniversalBatchWritePipeline:
     """
     【通用异步批量写入管道】
-    替代原有的 *DrugPipeline，根据 Item 动态识别 Model 并写入。
+    根据配置选择存储后端 (MySQL/ES)，并执行批量写入。
     """
     
-    def __init__(self, buffer_size=50, timeout=2):
+    def __init__(self, settings):
         self.buffer = []
-        self.buffer_size = buffer_size
-        self.timeout = timeout
+        self.buffer_size = settings.getint('BUFFER_THRESHOLD', 500)
+        self.timeout = settings.getfloat('BUFFER_TIMEOUT_SEC', 1.5)
         self.last_flush_time = time.time()
-        
-        # 数据库 Session 工厂
-        self.session_maker = SessionLocal 
         
         # 使用 set 仅存储当前活跃的异步任务
         self.active_tasks = set()
+        
+        # 初始化存储后端
+        backend_type = settings.get('STORAGE_BACKEND', 'mysql').lower()
+        logger.info(f"Initializing Storage Backend: {backend_type}")
+        
+        if backend_type == 'elasticsearch':
+            from .storage.elasticsearch import ElasticsearchStorage
+            self.storage = ElasticsearchStorage(
+                hosts=settings.get('ES_HOSTS', ['http://localhost:9200']),
+                user=settings.get('ES_USER'),
+                password=settings.get('ES_PASSWORD'),
+                index_prefix=settings.get('ES_INDEX_PREFIX', 'drug_store')
+            )
+        else:
+            from .storage.mysql import MySQLStorage
+            self.storage = MySQLStorage()
 
     @classmethod
     def from_crawler(cls, crawler):
-        settings = crawler.settings
-        return cls(
-            buffer_size=settings.getint('BUFFER_THRESHOLD', 100),
-            timeout=settings.getfloat('BUFFER_TIMEOUT_SEC', 2.0)
-        )
+        return cls(settings=crawler.settings)
 
     def process_item(self, item, spider):
         # 1. 过滤 None 或 状态 Item
@@ -111,67 +120,13 @@ class UniversalBatchWritePipeline:
             
         logger.info("✅ Pipeline 关闭完成：所有数据已安全落库。")
 
-    def _get_model_class(self, item):
-        """
-        动态获取 Item 对应的 SQLAlchemy Model 类。
-        优先调用 item.get_model_class()，其次查找 item['model_class']，最后回退到 CrawlData。
-        """
-        if hasattr(item, 'get_model_class'):
-            return item.get_model_class()
-        
-        # 兼容旧逻辑或字典类型的 item
-        if isinstance(item, dict) and 'model_class' in item:
-            return item['model_class']
-            
-        return CrawlData
-
-    def _create_orm_object(self, item, model_class):
-        if not item: return None
-        # 自动映射 Item 字段到 Model 字段
-        model_fields = [c.key for c in model_class.__table__.columns]
-        
-        # ItemAdapter 统一处理 Item 对象和字典
-        adapter = ItemAdapter(item)
-        item_data = {k: v for k, v in adapter.items() if k in model_fields}
-        
-        return model_class(**item_data)
-
     def _flush_buffer(self, items):
         """执行数据库写入（运行在线程池中）"""
-        session = self.session_maker()
         try:
-            orm_objects = []
-            for item in items:
-                if item:
-                    model = self._get_model_class(item)
-                    obj = self._create_orm_object(item, model)
-                    if obj:
-                        orm_objects.append(obj)
-            
-            if not orm_objects: return
-
-            session.add_all(orm_objects)
-            session.commit()
-            logger.info(f"💾 批量写入成功: {len(orm_objects)} 条")
-            
+            count = self.storage.save_batch(items)
+            logger.info(f"💾 批量写入成功: {count} 条 (新增)")
         except Exception as e:
-            session.rollback()
-            logger.error(f"⚠️ 批量写入失败: {e}，正在降级为逐条写入...")
-            self._fallback_single_write(session, orm_objects)
-        finally:
-            session.close()
-
-    def _fallback_single_write(self, session, objects):
-        count = 0
-        for obj in objects:
-            try:
-                session.merge(obj)
-                session.commit()
-                count += 1
-            except Exception as e:
-                session.rollback()
-                logger.error(f"❌ 单条写入丢弃: {e}")
-        logger.info(f"🆗 降级处理完成: 挽回 {count}/{len(objects)} 条")
+            logger.error(f"⚠️ 批量写入失败: {e}")
 
 
 class CrawlStatusPipeline:

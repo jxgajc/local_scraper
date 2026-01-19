@@ -34,12 +34,15 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
         session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json, text/plain, */*',
+            # TODO: 检查是否需要动态获取 Authorization Token
+            # 'Authorization': '...' 
         })
 
         while True:
             if stop_check and stop_check():
                 break
             try:
+                # TODO: 检查是否需要对 Payload 进行加密签名
                 payload = {"current": current, "size": page_size, "searchCount": True}
                 response = session.post(cls.list_api_url, json=payload, timeout=30)
                 response.raise_for_status()
@@ -80,7 +83,7 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
     @classmethod
     def recrawl_by_ids(cls, missing_data, db_session, logger=None):
         """根据缺失的 drug_code 及其基础信息直接调用详情API进行补采"""
-        from ..models.guangdong_drug import GuangdongDrug
+        from ..models.guangdong_drug import GuangdongDrug, GuangdongDrugItem
         from datetime import datetime
         import hashlib
         import time
@@ -108,6 +111,26 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
 
                 if hospitals:
                     for hosp in hospitals:
+                        # 使用 Item 计算 MD5
+                        item = GuangdongDrugItem()
+                        item.update(base_info)
+                        item['has_hospital_record'] = True
+                        item['medins_code'] = hosp.get('medinsCode')
+                        item['medins_name'] = hosp.get('medinsName')
+                        item['hosp_type'] = hosp.get('type')
+                        
+                        # 解析行政区划
+                        admdvs_full = hosp.get('admdvsName', '')
+                        item['admdvs_name'] = admdvs_full
+                        if admdvs_full:
+                            parts = admdvs_full.split('＞')
+                            if len(parts) >= 2:
+                                item['city_name'] = parts[1]
+                            if len(parts) >= 3:
+                                item['area_name'] = parts[2]
+                                
+                        item.generate_md5_id()
+
                         record = GuangdongDrug(
                             **base_info,
                             has_hospital_record=True,
@@ -115,20 +138,22 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
                             medins_name=hosp.get('medinsName'),
                             hosp_type=hosp.get('type'),
                             admdvs_name=hosp.get('admdvsName'),
-                            collect_time=datetime.now()
+                            collect_time=datetime.now(),
+                            md5_id=item['md5_id']
                         )
-                        field_values = {'drug_code': drug_code, 'medins_code': hosp.get('medinsCode')}
-                        record.md5_id = hashlib.md5(
-                            json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
-                        ).hexdigest()
                         db_session.add(record)
                 else:
+                    item = GuangdongDrugItem()
+                    item.update(base_info)
+                    item['has_hospital_record'] = False
+                    item.generate_md5_id()
+
                     record = GuangdongDrug(
                         **base_info,
                         has_hospital_record=False,
-                        collect_time=datetime.now()
+                        collect_time=datetime.now(),
+                        md5_id=item['md5_id']
                     )
-                    record.md5_id = hashlib.md5(drug_code.encode()).hexdigest()
                     db_session.add(record)
 
                 success_count += 1
@@ -165,7 +190,7 @@ class GuangdongDrugSpider(SpiderStatusMixin, scrapy.Spider):
             'Origin': 'https://igi.hsa.gd.gov.cn',
             'Referer': 'https://igi.hsa.gd.gov.cn/tps/tps_public/publicity/listPubonlnPublicityD',
             # 'User-Agent': Handled by RandomUserAgentMiddleware
-            'Authorization': 'null',
+            # 'Authorization': 'null', # Removed suspicious null auth
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',

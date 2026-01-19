@@ -1,11 +1,12 @@
 from sqlalchemy import Column, String, Integer, JSON, DateTime, Float, Text, BigInteger
 from . import BaseModel
+from .mixins import BizFingerprintMixin
 import scrapy
 import hashlib
 import json
 from datetime import datetime
 
-class NingxiaDrugItem(scrapy.Item):
+class NingxiaDrugItem(BizFingerprintMixin, scrapy.Item):
     """
     宁夏医保药品及医院数据Item
     对应 ningxia_drug_store.py 的两层采集结构
@@ -48,27 +49,19 @@ class NingxiaDrugItem(scrapy.Item):
     def generate_md5_id(self):
         """
         生成唯一标识
-        逻辑变更为: 采购目录ID (药品) + 医院名称
-        确保同一药品在不同医院的分布是唯一的
         """
-        # 核心去重字段
-        procure_id = str(self.get('procurecatalogId', ''))
-        hospital_name = str(self.get('hospitalName', ''))
-        product_name = str(self.get('productName', ''))
-        
-        # 如果没有 hospitalName (仅有药品列表情况)，则退化为使用 procurecatalogId + orderId
-        if not hospital_name:
-            unique_str = f"{procure_id}_{self.get('orderDetailId', '')}"
-        else:
-            unique_str = f"{procure_id}_{hospital_name}_{product_name}"
-            
-        # 计算MD5哈希值
-        md5_hash = hashlib.md5(unique_str.encode('utf-8')).hexdigest()
-        
-        self['md5_id'] = md5_hash
+        mapping = {
+            'HospitalName': 'hospitalName',
+            'ProductName': 'productName',
+            'MedicineModelName': 'medicinemodel',
+            'Outlookc': 'outlook',
+            'Pack': 'unit',
+            'Manufacturer': 'companyNameTb'
+        }
+        self.generate_biz_id(field_mapping=mapping)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        return md5_hash
+        return self['md5_id']
 
     def get_model_class(self):
         return NingxiaDrug

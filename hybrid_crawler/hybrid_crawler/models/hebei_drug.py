@@ -1,11 +1,12 @@
 from sqlalchemy import Column, String, Integer, JSON, DateTime, Float, Text
 from . import BaseModel
+from .mixins import BizFingerprintMixin
 import scrapy
 import hashlib
 import json
 from datetime import datetime
 
-class HebeiDrugItem(scrapy.Item):
+class HebeiDrugItem(BizFingerprintMixin, scrapy.Item):
     """
     hebei医保药品数据Item
     字段已根据提供的JSON数据进行对齐
@@ -36,24 +37,19 @@ class HebeiDrugItem(scrapy.Item):
     def generate_md5_id(self):
         """
         根据核心业务字段生成MD5唯一标识
-        注意：通常我们只用"药品基础信息"生成指纹，因为采购信息可能会动态增加
         """
-        # 参与签名的字段（排除采集时间、采购列表等动态字段，确保同一药品的ID稳定）
-        sign_fields = ['prodId', 'prodCode', 'prodName', 'prodSpec', 'prodentpName']
-        
-        field_values = {}
-        for field in sign_fields:
-            field_values[field] = str(self.get(field, ''))
-        
-        # 排序并拼接
-        sorted_json = json.dumps(field_values, sort_keys=True, ensure_ascii=False)
-        
-        md5_hash = hashlib.md5(sorted_json.encode('utf-8')).hexdigest()
-        
-        self['md5_id'] = md5_hash
+        mapping = {
+            'ProductName': 'prodName',
+            'MedicineModelName': 'dosform',
+            'Outlookc': 'prodSpec',
+            'Pack': 'prodPac',
+            'Manufacturer': 'prodentpName'
+            # HospitalName 留空 (Hebei数据结构为单药品多医院列表)
+        }
+        self.generate_biz_id(field_mapping=mapping)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        return md5_hash
+        return self['md5_id']
 
     def get_model_class(self):
         return HebeiDrug

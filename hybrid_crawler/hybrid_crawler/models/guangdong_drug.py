@@ -4,8 +4,9 @@ import json
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, Float
 from . import BaseModel
+from .mixins import BizFingerprintMixin
 
-class GuangdongDrugItem(scrapy.Item):
+class GuangdongDrugItem(BizFingerprintMixin, scrapy.Item):
     """
     广东省药品数据 Item (信息无损版)
     对应接口: queryPubonlnPage (药品基础) + getPurcHospitalInfoListNew (医院采购)
@@ -73,27 +74,17 @@ class GuangdongDrugItem(scrapy.Item):
 
     def generate_md5_id(self):
         """
-        生成规则: 使用采集到的所有信息作为MD5计算的输入
-        这样可以确保只要任何字段发生变化，都会生成不同的MD5
+        生成规则: 使用统一业务指纹
         """
-        # 获取所有字段并排序，确保生成顺序一致
-        sorted_fields = sorted(self.items())
-        
-        # 创建用于生成MD5的字符串
-        sign_str = ''
-        for field_name, field_value in sorted_fields:
-            # 跳过已经生成的md5_id和collect_time字段
-            if field_name in ['md5_id', 'collect_time']:
-                continue
-            # 将字段值转换为字符串
-            str_value = str(field_value) if field_value is not None else ''
-            sign_str += f"{field_name}:{str_value}|"
-        
-        # 移除最后一个分隔符
-        if sign_str.endswith('|'):
-            sign_str = sign_str[:-1]
-        
-        self['md5_id'] = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
+        mapping = {
+            'HospitalName': 'medins_name',
+            'ProductName': 'gen_name',
+            'MedicineModelName': 'dosform_name',
+            'Outlookc': 'spec_name',
+            'Pack': 'min_pac_name',
+            'Manufacturer': 'prod_entp_name'
+        }
+        self.generate_biz_id(field_mapping=mapping)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     def get_model_class(self):

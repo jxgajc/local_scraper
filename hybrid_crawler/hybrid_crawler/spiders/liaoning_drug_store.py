@@ -11,11 +11,7 @@ import requests
 from scrapy.http import JsonRequest, FormRequest
 import os
 from .mixins import SpiderStatusMixin
-
-# 获取脚本所在目录的绝对路径
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# 构建Excel文件的绝对路径
-excel_path = os.path.join(script_dir, "../../关键字采集(2).xlsx")
+from scrapy.utils.project import get_project_settings
 
 class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     """
@@ -35,6 +31,18 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     }
 
     @classmethod
+    def _get_excel_path(cls):
+        settings = get_project_settings()
+        # 优先从配置读取，默认为项目根目录下的文件
+        path = settings.get('KEYWORD_FILE_PATH', '关键字采集(2).xlsx')
+        if not os.path.isabs(path):
+            # 假设相对于项目根目录 (scrapy.cfg所在目录)
+            # 这里简单处理，假设在 local_scraper 下
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            path = os.path.join(base_dir, path)
+        return path
+
+    @classmethod
     def fetch_all_ids_from_api(cls, logger=None, stop_check=None):
         """
         辽宁爬虫是基于关键词的，需要遍历关键词获取所有数据
@@ -42,6 +50,8 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
         """
         api_data = {}
         session = requests.Session()
+        
+        excel_path = cls._get_excel_path()
 
         # 加载关键词
         try:
@@ -49,7 +59,7 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             keywords = df_name.loc[:, "采集关键字"].to_list()
         except Exception as e:
             if logger:
-                logger.error(f"关键词文件加载失败: {e}")
+                logger.error(f"关键词文件加载失败: {e} (Path: {excel_path})")
             return api_data
 
         for keyword in keywords:
@@ -96,7 +106,7 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
     @classmethod
     def recrawl_by_ids(cls, missing_data, db_session, logger=None):
         """辽宁爬虫补采 - 直接保存缺失的数据"""
-        from ..models.liaoning_drug import LiaoningDrug
+        from ..models.liaoning_drug import LiaoningDrug, LiaoningDrugItem
         from datetime import datetime
         import hashlib
 
@@ -104,8 +114,19 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
         for goods_code, drug_info in missing_data.items():
             time.sleep(3)
             try:
+                # 1. 使用 Item 生成正确的 MD5 指纹
+                item = LiaoningDrugItem()
+                # 填充 Item 字段
+                for k in item.fields:
+                    if k in drug_info:
+                        item[k] = drug_info[k]
+                
+                # 生成指纹 (使用 Mixin 逻辑)
+                item.generate_md5_id()
+                
+                # 2. 创建 Model 对象
                 record = LiaoningDrug(
-                    goodscode=goods_code,
+                    goodscode=goods_code, # 注意: Model 字段名可能与 Item 不完全一致，需确认 LiaoningDrug 定义
                     ProductName=drug_info.get('ProductName'),
                     MedicineModelName=drug_info.get('MedicineModelName'),
                     Outlookc=drug_info.get('Outlookc'),
@@ -113,9 +134,10 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
                     Pack=drug_info.get('Pack'),
                     GoodsName=drug_info.get('GoodsName'),
                     SubmiTime=drug_info.get('SubmiTime'),
-                    collect_time=datetime.now()
+                    collect_time=datetime.now(),
+                    md5_id=item['md5_id'] # 使用 Item 生成的统一指纹
                 )
-                record.md5_id = hashlib.md5(goods_code.encode()).hexdigest()
+                
                 db_session.add(record)
                 success_count += 1
 
@@ -138,13 +160,14 @@ class LiaoningDrugSpider(SpiderStatusMixin, BaseRequestSpider):
         self.recrawl_mode = self.recrawl_ids is not None
 
         # 加载关键词
+        excel_path = self._get_excel_path()
         try:
             df_name = pd.read_excel(excel_path)
             self.product_list = df_name.loc[:, "采集关键字"].to_list()
             mode_str = f"补采模式，目标 {len(self.recrawl_ids)} 条" if self.recrawl_mode else "全量采集"
             self.spider_log.info(f"🚀 爬虫初始化完成，crawl_id: {self.crawl_id}，模式: {mode_str}，加载关键词: {len(self.product_list)} 个")
         except Exception as e:
-            self.spider_log.error(f"❌ 关键词文件加载失败: {e}")
+            self.spider_log.error(f"❌ 关键词文件加载失败: {e} (Path: {excel_path})")
             self.product_list = []
 
     custom_settings = {

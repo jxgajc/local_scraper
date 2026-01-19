@@ -1,8 +1,26 @@
 import os
+from dotenv import load_dotenv
+
+# 加载 .env 文件 (优先加载项目根目录下的 .env)
+# 假设 settings.py 位于 project/project/settings.py，则 .env 位于 project/.env
+script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_path = os.path.join(script_dir, '.env')
+load_dotenv(env_path)
 
 BOT_NAME = 'hybrid_crawler'
 SPIDER_MODULES = ['hybrid_crawler.spiders']
 NEWSPIDER_MODULE = 'hybrid_crawler.spiders'
+
+# =============================================================================
+# 存储后端配置
+# =============================================================================
+STORAGE_BACKEND = os.getenv('STORAGE_BACKEND', 'mysql')
+
+# --- Elasticsearch 配置 ---
+ES_HOSTS = os.getenv('ES_HOSTS', 'http://localhost:9200').split(',')
+ES_USER = os.getenv('ES_USER')
+ES_PASSWORD = os.getenv('ES_PASSWORD')
+ES_INDEX_PREFIX = os.getenv('ES_INDEX_PREFIX', 'drug_store')
 
 # =============================================================================
 # 数据库配置
@@ -15,8 +33,8 @@ os.environ['DATABASE_URL'] = DATABASE_URL
 # =============================================================================
 # 核心并发配置
 # =============================================================================
-CONCURRENT_REQUESTS = 32
-DOWNLOAD_DELAY = 0
+CONCURRENT_REQUESTS = int(os.getenv('CONCURRENT_REQUESTS', 32))
+DOWNLOAD_DELAY = float(os.getenv('DOWNLOAD_DELAY', 0))
 
 # 【关键优化】增加线程池大小，防止数据库 I/O 耗尽线程导致死锁
 # 默认只有 10，对于并发 32 的爬虫来说太小
@@ -62,8 +80,8 @@ ITEM_PIPELINES = {
 # =============================================================================
 # 异步写入缓冲配置
 # =============================================================================
-BUFFER_THRESHOLD = 500  # 积攒 500 条写入一次
-BUFFER_TIMEOUT_SEC = 1.5 # 或最长等待 1.5 秒写入一次
+BUFFER_THRESHOLD = int(os.getenv('BUFFER_THRESHOLD', 500))  # 积攒 500 条写入一次
+BUFFER_TIMEOUT_SEC = float(os.getenv('BUFFER_TIMEOUT_SEC', 1.5)) # 或最长等待 1.5 秒写入一次
 
 # =============================================================================
 # User-Agent 池配置

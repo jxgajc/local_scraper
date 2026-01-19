@@ -3,8 +3,9 @@ import hashlib
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, Float, Boolean
 from . import BaseModel
+from .mixins import BizFingerprintMixin
 
-class HainanDrugItem(scrapy.Item):
+class HainanDrugItem(BizFingerprintMixin, scrapy.Item):
     """
     海南省药品及药店库存数据 Item
     对应接口: getDrugStore (药品列表) + getDrugStoreDetl (药店详情)
@@ -30,6 +31,7 @@ class HainanDrugItem(scrapy.Item):
     shop_code = scrapy.Field()          # medinsCode (机构编码)
     shop_type_memo = scrapy.Field()     # memo (机构类型备注)
     
+    # --- 价格与库存 ---
     price = scrapy.Field()              # pric (价格)
     inventory = scrapy.Field()          # invCnt (库存数量)
     update_time = scrapy.Field()        # invChgTime (库存更新时间)
@@ -43,13 +45,17 @@ class HainanDrugItem(scrapy.Item):
 
     def generate_md5_id(self):
         """
-        生成规则: 药品编码 + 机构编码 (确保唯一性)
+        生成规则: 使用统一业务指纹
         """
-        # 如果没有药店记录，只用药品编码，防止重复插入
-        key_part_2 = self.get('shop_code', 'NO_SHOP')
-        sign_str = f"{self.get('drug_code')}|{key_part_2}"
-        
-        self['md5_id'] = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
+        mapping = {
+            'HospitalName': 'shop_name',
+            'ProductName': 'prod_name',
+            'MedicineModelName': 'dosform',
+            'Outlookc': 'spec',
+            'Pack': 'pac',
+            'Manufacturer': 'prod_entp'
+        }
+        self.generate_biz_id(field_mapping=mapping)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     def get_model_class(self):
