@@ -3,6 +3,7 @@ BaseRecrawlAdapter - 补充采集适配器抽象基类
 """
 import asyncio
 import aiohttp
+from datetime import datetime
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable
 from ..models import SessionLocal
@@ -30,9 +31,49 @@ class BaseRecrawlAdapter(ABC):
         'Accept': 'application/json, text/plain, */*',
     }
 
-    def __init__(self, stop_check: Callable = None):
+    def __init__(self, stop_check: Callable = None, update_only: bool = False):
         self.logger = get_spider_logger(self.spider_name)
         self.stop_check = stop_check
+        self.update_only = update_only
+
+    def _touch_updated_at(self, record) -> None:
+        now = datetime.now()
+        if hasattr(record, 'updated_at'):
+            record.updated_at = now
+        if hasattr(record, 'collect_time'):
+            record.collect_time = now
+
+    def _touch_by_unique_id(self, db_session, model_cls, unique_id_value) -> int:
+        now = datetime.now()
+        values = {}
+        if hasattr(model_cls, 'updated_at'):
+            values['updated_at'] = now
+        if hasattr(model_cls, 'collect_time'):
+            values['collect_time'] = now
+        if not values:
+            return 0
+        unique_col = getattr(model_cls, self.unique_id, None)
+        if unique_col is None:
+            return 0
+        match_count = db_session.query(model_cls).filter(unique_col == unique_id_value).count()
+        if match_count != 1:
+            self.logger.warning(f"[{self.spider_name}] unique_id={unique_id_value} match_count={match_count}, skip update")
+            return 0
+        return db_session.query(model_cls).filter(unique_col == unique_id_value).update(values, synchronize_session=False)
+
+    def _persist_record(self, db_session, model_cls, record, unique_id_value) -> None:
+        md5_value = getattr(record, 'md5_id', None)
+        if md5_value:
+            existing = db_session.query(model_cls).filter(model_cls.md5_id == md5_value).first()
+            if existing:
+                self._touch_updated_at(existing)
+                return
+
+        if self.update_only:
+            self._touch_by_unique_id(db_session, model_cls, unique_id_value)
+            return
+
+        db_session.add(record)
 
     def _should_stop(self) -> bool:
         """检查是否应该停止"""

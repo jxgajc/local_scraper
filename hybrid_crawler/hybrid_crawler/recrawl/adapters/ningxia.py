@@ -100,7 +100,7 @@ class NingxiaRecrawlAdapter(BaseRecrawlAdapter):
                             record.md5_id = hashlib.md5(
                                 json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
                             ).hexdigest()
-                            db_session.add(record)
+                            self._persist_record(db_session, NingxiaDrug, record, procure_id)
                     else:
                         record = NingxiaDrug(
                             procurecatalogId=procure_id,
@@ -108,7 +108,7 @@ class NingxiaRecrawlAdapter(BaseRecrawlAdapter):
                             collect_time=datetime.now()
                         )
                         record.md5_id = hashlib.md5(procure_id.encode()).hexdigest()
-                        db_session.add(record)
+                        self._persist_record(db_session, NingxiaDrug, record, procure_id)
 
                     success_count += 1
                     self.logger.info(f"[{self.spider_name}] 补采 procurecatalogId={procure_id} 成功")

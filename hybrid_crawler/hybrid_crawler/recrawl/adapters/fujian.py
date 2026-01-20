@@ -131,7 +131,8 @@ class FujianRecrawlAdapter(BaseRecrawlAdapter):
                                 record.md5_id = hashlib.md5(
                                     json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
                                 ).hexdigest()
-                                db_session.add(record)
+
+                                self._persist_record(db_session, FujianDrug, record, ext_code)
                         else:
                             record = FujianDrug(
                                 ext_code=base_info.get('ext_code'),
@@ -148,7 +149,8 @@ class FujianRecrawlAdapter(BaseRecrawlAdapter):
                                 collect_time=datetime.now()
                             )
                             record.md5_id = hashlib.md5(ext_code.encode()).hexdigest()
-                            db_session.add(record)
+
+                            self._persist_record(db_session, FujianDrug, record, ext_code)
 
                     success_count += 1
                     self.logger.info(f"[{self.spider_name}] 补采 ext_code={ext_code} 成功")

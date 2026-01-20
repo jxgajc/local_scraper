@@ -158,7 +158,7 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
                                 collect_time=datetime.now(),
                                 md5_id=item['md5_id']
                             )
-                            db_session.add(record)
+                            self._persist_record(db_session, TianjinDrug, record, med_id)
                     else:
                         item = TianjinDrugItem()
                         item.update(base_info)
@@ -178,7 +178,7 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
                             collect_time=datetime.now(),
                             md5_id=item['md5_id']
                         )
-                        db_session.add(record)
+                        self._persist_record(db_session, TianjinDrug, record, med_id)
 
                     success_count += 1
                     self.logger.info(f"[{self.spider_name}] 补采 med_id={med_id} 成功")

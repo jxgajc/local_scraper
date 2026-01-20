@@ -96,7 +96,7 @@ class HebeiRecrawlAdapter(BaseRecrawlAdapter):
                         collect_time=datetime.now()
                     )
                     record.md5_id = hashlib.md5(prod_code.encode()).hexdigest()
-                    db_session.add(record)
+                    self._persist_record(db_session, HebeiDrug, record, prod_code)
 
                     success_count += 1
                     self.logger.info(f"[{self.spider_name}] 补采 prodCode={prod_code} 成功，医院数: {len(hospital_list)}")

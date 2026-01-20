@@ -112,7 +112,9 @@ class LiaoningRecrawlAdapter(BaseRecrawlAdapter):
                     SubmiTime=drug_info.get('SubmiTime'),
                     collect_time=datetime.now()
                 )
-                db_session.add(record)
+
+                self._persist_record(db_session, LiaoningDrug, record, md5_id)
+
                 success_count += 1
                 self.logger.info(f"[{self.spider_name}] 补采 md5_id={md5_id[:8]}... 成功")
 

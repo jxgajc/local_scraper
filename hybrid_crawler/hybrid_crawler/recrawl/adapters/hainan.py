@@ -106,7 +106,7 @@ class HainanRecrawlAdapter(BaseRecrawlAdapter):
                             record.md5_id = hashlib.md5(
                                 json.dumps(field_values, sort_keys=True, ensure_ascii=False).encode()
                             ).hexdigest()
-                            db_session.add(record)
+                            self._persist_record(db_session, HainanDrug, record, drug_code)
                     else:
                         record = HainanDrug(
                             drug_code=base_info.get('drug_code'),
@@ -120,7 +120,7 @@ class HainanRecrawlAdapter(BaseRecrawlAdapter):
                             collect_time=datetime.now()
                         )
                         record.md5_id = hashlib.md5(drug_code.encode()).hexdigest()
-                        db_session.add(record)
+                        self._persist_record(db_session, HainanDrug, record, drug_code)
 
                     success_count += 1
                     self.logger.info(f"[{self.spider_name}] 补采 drug_code={drug_code} 成功")
