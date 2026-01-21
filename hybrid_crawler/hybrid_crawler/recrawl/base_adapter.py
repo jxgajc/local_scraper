@@ -56,17 +56,31 @@ class BaseRecrawlAdapter(ABC):
         if unique_col is None:
             return 0
         match_count = db_session.query(model_cls).filter(unique_col == unique_id_value).count()
-        if match_count != 1:
-            self.logger.warning(f"[{self.spider_name}] unique_id={unique_id_value} match_count={match_count}, skip update")
+        if match_count == 0:
             return 0
-        return db_session.query(model_cls).filter(unique_col == unique_id_value).update(values, synchronize_session=False)
+        
+        # 允许更新多条记录（针对一对多关系的表）
+        updated_rows = db_session.query(model_cls).filter(unique_col == unique_id_value).update(values, synchronize_session=False)
+        if updated_rows > 1000:
+             self.logger.warning(f"[{self.spider_name}] unique_id={unique_id_value} updated {updated_rows} rows")
+        return updated_rows
+
+    def _touch_by_md5_id(self, db_session, model_cls, md5_value) -> int:
+        now = datetime.now()
+        values = {}
+        if hasattr(model_cls, 'updated_at'):
+            values['updated_at'] = now
+        if hasattr(model_cls, 'collect_time'):
+            values['collect_time'] = now
+        if not values:
+            return 0
+        return db_session.query(model_cls).filter(model_cls.md5_id == md5_value).update(values, synchronize_session=False)
 
     def _persist_record(self, db_session, model_cls, record, unique_id_value) -> None:
         md5_value = getattr(record, 'md5_id', None)
         if md5_value:
-            existing = db_session.query(model_cls).filter(model_cls.md5_id == md5_value).first()
-            if existing:
-                self._touch_updated_at(existing)
+            updated = self._touch_by_md5_id(db_session, model_cls, md5_value)
+            if updated:
                 return
 
         if self.update_only:

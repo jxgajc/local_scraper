@@ -39,7 +39,8 @@ class NingxiaRecrawlAdapter(BaseRecrawlAdapter):
                         "rows": str(page_size), "sidx": "", "sord": "asc"
                     }
                     async with session.post(self.list_api_url, data=form_data, timeout=30) as resp:
-                        res_json = await resp.json()
+                        # 强制解析 JSON，忽略 content-type
+                        res_json = await resp.json(content_type=None)
 
                     total_pages = int(res_json.get("total", 0))
                     current_page = int(res_json.get("page", 1))
@@ -68,7 +69,13 @@ class NingxiaRecrawlAdapter(BaseRecrawlAdapter):
         from ...models.ningxia_drug import NingxiaDrug
 
         success_count = 0
-        headers = {**self.default_headers, 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
+        headers = {
+            **self.default_headers, 
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Origin': 'https://nxyp.ylbz.nx.gov.cn',
+            'Referer': 'https://nxyp.ylbz.nx.gov.cn/cms/showListYPXQ.html',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
 
         async with aiohttp.ClientSession(headers=headers) as session:
             for procure_id, drug_info in missing_data.items():
@@ -80,18 +87,40 @@ class NingxiaRecrawlAdapter(BaseRecrawlAdapter):
                         "_search": "false", "rows": "100", "page": "1", "sidx": "", "sord": "asc"
                     }
                     async with session.post(self.hospital_api_url, data=detail_payload, timeout=30) as resp:
-                        res_json = await resp.json()
+                        # 某些接口返回 JSON 但 Content-Type 是 text/html，强制解析
+                        try:
+                            res_json = await resp.json(content_type=None)
+                        except Exception as json_err:
+                            text = await resp.text()
+                            self.logger.error(f"[{self.spider_name}] JSON解析失败: {json_err} | 响应内容前200字符: {text[:200]}")
+                            raise json_err
 
                     hospitals = res_json.get("rows", [])
+
+                    # 针对 update_only 模式的优化：避免在一对多关系中重复执行全量更新
+                    if self.update_only:
+                        updated = self._touch_by_unique_id(db_session, NingxiaDrug, procure_id)
+                        if updated > 0:
+                            self.logger.info(f"[{self.spider_name}] 批量更新 procurecatalogId={procure_id} 完成，共 {updated} 条")
+                        else:
+                            # 数据库中无此ID记录，如果需要插入空记录占位可在此处理
+                            # 目前逻辑：仅更新时间，不强制插入
+                            pass
+                        
+                        # 提交事务防止超时丢失
+                        db_session.commit()
+                        success_count += 1
+                        await self._delay()
+                        continue
 
                     if hospitals:
                         for hosp in hospitals:
                             record = NingxiaDrug(
                                 procurecatalogId=procure_id,
                                 productName=drug_info.get('productName'),
-                                dosformName=drug_info.get('dosformName'),
-                                specName=drug_info.get('specName'),
-                                prodentpName=drug_info.get('prodentpName'),
+                                medicinemodel=drug_info.get('medicinemodel'),
+                                outlook=drug_info.get('outlook'),
+                                companyNameTb=drug_info.get('companyNameTb'),
                                 hospitalName=hosp.get('hospitalName'),
                                 areaName=hosp.get('areaName'),
                                 collect_time=datetime.now()
@@ -117,6 +146,9 @@ class NingxiaRecrawlAdapter(BaseRecrawlAdapter):
                     self.logger.error(f"[{self.spider_name}] 补采 procurecatalogId={procure_id} 失败: {e}")
 
                 await self._delay()
+                
+                # 每次循环提交事务，防止超时导致全部回滚
+                db_session.commit()
 
         db_session.commit()
         return success_count

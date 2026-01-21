@@ -104,16 +104,88 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
 
                 hospital_list = res_json.get("list", []) or []
 
-                record = HebeiDrug(
-                    prodCode=prod_code,
-                    prodName=drug_info.get('prodName'),
-                    prodentpName=drug_info.get('prodentpName'),
-                    prodentpCode=prodentp_code,
-                    hospital_purchases=hospital_list,
-                    collect_time=datetime.now()
-                )
-                record.md5_id = hashlib.md5(prod_code.encode()).hexdigest()
-                db_session.add(record)
+                url = f"{cls.hospital_api_url}?pageNo=1&pageSize=1000&prodCode={prod_code}&prodEntpCode={prodentp_code}"
+                if hospital_list:
+                    for hosp in hospital_list:
+                        item = HebeiDrugItem()
+                        for field_name in item.fields:
+                            if field_name in ['md5_id', 'collect_time', 'url', 'url_hash', 'hospital_purchases', 'page_num', 'hospital_name', 'hospital_admdvs', 'hospital_shp_cnt', 'hospital_shp_time', 'hospital_is_public']:
+                                continue
+                            if field_name in drug_info:
+                                item[field_name] = drug_info[field_name]
+                        item['hospital_purchases'] = hosp
+                        item['hospital_name'] = hosp.get('prodEntpName') or hosp.get('hospitalName') or hosp.get('medinsName')
+                        item['hospital_admdvs'] = hosp.get('prodEntpAdmdvs') or hosp.get('admdvsName')
+                        item['hospital_shp_cnt'] = hosp.get('shpCnt')
+                        item['hospital_shp_time'] = hosp.get('shpTimeFormat')
+                        item['hospital_is_public'] = hosp.get('isPublicHospitals')
+                        item['url'] = url
+                        item['page_num'] = 1
+                        item.generate_md5_id()
+
+                        record = HebeiDrug(
+                            prodId=drug_info.get('prodId'),
+                            prodCode=prod_code,
+                            prodName=drug_info.get('prodName'),
+                            dosform=drug_info.get('dosform'),
+                            prodSpec=drug_info.get('prodSpec'),
+                            prodPac=drug_info.get('prodPac'),
+                            prodentpName=drug_info.get('prodentpName'),
+                            prodentpCode=prodentp_code,
+                            pubonlnPric=drug_info.get('pubonlnPric'),
+                            isMedicare=drug_info.get('isMedicare'),
+                            hospital_purchases=hosp,
+                            hospital_name=item.get('hospital_name'),
+                            hospital_admdvs=item.get('hospital_admdvs'),
+                            hospital_shp_cnt=item.get('hospital_shp_cnt'),
+                            hospital_shp_time=item.get('hospital_shp_time'),
+                            hospital_is_public=item.get('hospital_is_public'),
+                            collect_time=datetime.now(),
+                            url=url,
+                            page_num=1,
+                            md5_id=item['md5_id']
+                        )
+                        db_session.add(record)
+                else:
+                    item = HebeiDrugItem()
+                    for field_name in item.fields:
+                        if field_name in ['md5_id', 'collect_time', 'url', 'url_hash', 'hospital_purchases', 'page_num', 'hospital_name', 'hospital_admdvs', 'hospital_shp_cnt', 'hospital_shp_time', 'hospital_is_public']:
+                            continue
+                        if field_name in drug_info:
+                            item[field_name] = drug_info[field_name]
+                    item['hospital_purchases'] = None
+                    item['hospital_name'] = None
+                    item['hospital_admdvs'] = None
+                    item['hospital_shp_cnt'] = None
+                    item['hospital_shp_time'] = None
+                    item['hospital_is_public'] = None
+                    item['url'] = url
+                    item['page_num'] = 1
+                    item.generate_md5_id()
+
+                    record = HebeiDrug(
+                        prodId=drug_info.get('prodId'),
+                        prodCode=prod_code,
+                        prodName=drug_info.get('prodName'),
+                        dosform=drug_info.get('dosform'),
+                        prodSpec=drug_info.get('prodSpec'),
+                        prodPac=drug_info.get('prodPac'),
+                        prodentpName=drug_info.get('prodentpName'),
+                        prodentpCode=prodentp_code,
+                        pubonlnPric=drug_info.get('pubonlnPric'),
+                        isMedicare=drug_info.get('isMedicare'),
+                        hospital_purchases=None,
+                        hospital_name=None,
+                        hospital_admdvs=None,
+                        hospital_shp_cnt=None,
+                        hospital_shp_time=None,
+                        hospital_is_public=None,
+                        collect_time=datetime.now(),
+                        url=url,
+                        page_num=1,
+                        md5_id=item['md5_id']
+                    )
+                    db_session.add(record)
 
                 success_count += 1
                 if logger:
@@ -396,8 +468,9 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
             # 优化：移除冗余状态上报
 
             # 3. 创建合并后的数据 Item
-            item = self._create_item(drug_info, hospital_list, page_num)
-            yield item
+            items = self._create_item(drug_info, hospital_list, page_num)
+            for item in items:
+                yield item
             
             # 更新状态，确认入库 1 条 (聚合了所有医院信息)
             yield self.report_detail_page(
@@ -408,7 +481,7 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
                 api_url=self.hospital_api_url,
                 parent_crawl_id=parent_crawl_id,
                 reference_id=drug_info.get('prodCode'),
-                items_stored=1,
+                items_stored=len(items),
                 total_pages=1
             )
 
@@ -429,31 +502,40 @@ class HebeiDrugSpider(SpiderStatusMixin, BaseRequestSpider):
         """
         构建 HebeiDrugItem
         """
-        item = HebeiDrugItem()
+        base_item = HebeiDrugItem()
         
         prodentp_code = drug_info.get("prodentpCode")
         prod_code = drug_info.get("prodCode")
         
         # 1. 设置药品基础信息
-        for field_name in item.fields:
-            if field_name in ['md5_id', 'collect_time', 'url', 'url_hash', 'hospital_purchases', 'page_num']:
+        for field_name in base_item.fields:
+            if field_name in ['md5_id', 'collect_time', 'url', 'url_hash', 'hospital_purchases', 'page_num', 'hospital_name']:
                 continue
             if field_name in drug_info:
-                item[field_name] = drug_info[field_name]
+                base_item[field_name] = drug_info[field_name]
+
+        url = f"{self.hospital_api_url}?pageNo=1&pageSize=1000&prodCode={prod_code}&prodEntpCode={prodentp_code}"
+        items = []
+
+        if hospital_list:
+            for hosp in hospital_list:
+                item = HebeiDrugItem(base_item)
+                item['hospital_purchases'] = hosp
+                item['hospital_name'] = hosp.get('prodEntpName') or hosp.get('hospitalName') or hosp.get('medinsName')
+                item['url'] = url
+                item['page_num'] = page_num
+                item.generate_md5_id()
+                items.append(item)
+        else:
+            item = HebeiDrugItem(base_item)
+            item['hospital_purchases'] = None
+            item['hospital_name'] = None
+            item['url'] = url
+            item['page_num'] = page_num
+            item.generate_md5_id()
+            items.append(item)
         
-        # 2. 设置医院采购信息
-        item['hospital_purchases'] = hospital_list
-        
-        # 3. 设置URL字段
-        item['url'] = f"{self.hospital_api_url}?pageNo=1&pageSize=1000&prodCode={prod_code}&prodEntpCode={prodentp_code}"
-        
-        # 4. 设置页码
-        item['page_num'] = page_num
-        
-        # 5. 生成MD5唯一ID
-        item.generate_md5_id()
-        
-        return item
+        return items
         
     def _update_cookies(self, response):
         """

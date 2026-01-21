@@ -104,6 +104,18 @@ class FujianRecrawlAdapter(BaseRecrawlAdapter):
                         hospitals = inner_json.get("data", [])
 
                         if hospitals:
+                            # 针对 update_only 模式的优化：避免在一对多关系中重复执行全量更新
+                            if self.update_only:
+                                updated = self._touch_by_unique_id(db_session, FujianDrug, ext_code)
+                                if updated > 0:
+                                    self.logger.info(f"[{self.spider_name}] 批量更新 ext_code={ext_code} 完成，共 {updated} 条")
+                                
+                                # 提交事务
+                                db_session.commit()
+                                success_count += 1
+                                await self._delay()
+                                continue
+
                             for hosp in hospitals:
                                 record = FujianDrug(
                                     ext_code=base_info.get('ext_code'),

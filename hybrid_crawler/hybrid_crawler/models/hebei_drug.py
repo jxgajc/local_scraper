@@ -25,7 +25,12 @@ class HebeiDrugItem(BizFingerprintMixin, scrapy.Item):
     
     # --- 医院采购信息 (对应 JSON 片段 2) ---
     # 这里将存储包含 hospital_name, shpCnt, time 等信息的列表
-    hospital_purchases = scrapy.Field() 
+    hospital_purchases = scrapy.Field()
+    hospital_name = scrapy.Field()
+    hospital_admdvs = scrapy.Field()
+    hospital_shp_cnt = scrapy.Field()
+    hospital_shp_time = scrapy.Field()
+    hospital_is_public = scrapy.Field()
     
     # --- 系统通用字段 ---
     md5_id = scrapy.Field()
@@ -43,8 +48,9 @@ class HebeiDrugItem(BizFingerprintMixin, scrapy.Item):
             'MedicineModelName': 'dosform',
             'Outlookc': 'prodSpec',
             'Pack': 'prodPac',
-            'Manufacturer': 'prodentpName'
-            # HospitalName 留空 (Hebei数据结构为单药品多医院列表)
+            'Manufacturer': 'prodentpName',
+            'HospitalName': 'hospital_name',
+            'ShopTime': 'hospital_shp_time'
         }
         self.generate_biz_id(field_mapping=mapping)
         self['collect_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

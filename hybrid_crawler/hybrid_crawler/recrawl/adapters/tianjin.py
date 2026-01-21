@@ -132,10 +132,26 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
                     hosp_list = data.get("list", [])
 
                     if hosp_list:
+                        # 针对 update_only 模式的优化：避免在一对多关系中重复执行全量更新
+                        if self.update_only:
+                            updated = self._touch_by_unique_id(db_session, TianjinDrug, med_id)
+                            if updated > 0:
+                                self.logger.info(f"[{self.spider_name}] 批量更新 med_id={med_id} 完成，共 {updated} 条")
+                            
+                            # 提交事务
+                            db_session.commit()
+                            success_count += 1
+                            await self._delay()
+                            continue
+
                         for hosp in hosp_list:
                             # 构造Item以生成MD5
                             item = TianjinDrugItem()
-                            item.update(base_info)
+                            # 仅更新Item中定义的字段
+                            for field in item.fields:
+                                if field in base_info:
+                                    item[field] = base_info[field]
+                                    
                             item['has_hospital_record'] = True
                             item['hs_name'] = hosp.get('hsname')
                             item['hs_lav'] = hosp.get('hslav')
@@ -161,7 +177,11 @@ class TianjinRecrawlAdapter(BaseRecrawlAdapter):
                             self._persist_record(db_session, TianjinDrug, record, med_id)
                     else:
                         item = TianjinDrugItem()
-                        item.update(base_info)
+                        # 仅更新Item中定义的字段
+                        for field in item.fields:
+                            if field in base_info:
+                                item[field] = base_info[field]
+                                
                         item['has_hospital_record'] = False
                         item.generate_md5_id()
                         
